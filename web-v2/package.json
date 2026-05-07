@@ -4,10 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-vite.ps1 dev",
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-vite.ps1 build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-vite.ps1 preview"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",

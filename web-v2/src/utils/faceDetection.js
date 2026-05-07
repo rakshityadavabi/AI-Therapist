@@ -6,6 +6,8 @@ export const EMOTIONS = ['neutral', 'happy', 'sad', 'angry', 'fearful', 'disgust
 export const DETECTION_CONFIG = {
   modelPath: '/models',
   minDetectionConfidence: 0.5,
+  tinyFaceInputSize: 320,
+  tinyFaceScoreThreshold: 0.3,
   minEmotionConfidence: 0.5,
   minFaceSize: 120,
   edgeMargin: 0.04,
@@ -15,6 +17,7 @@ export const DETECTION_CONFIG = {
 
 let modelsLoaded = false;
 let loadPromise = null;
+let activeDetector = null;
 
 export async function loadFaceModels(modelPath = DETECTION_CONFIG.modelPath) {
   if (modelsLoaded) return true;
@@ -22,11 +25,21 @@ export async function loadFaceModels(modelPath = DETECTION_CONFIG.modelPath) {
 
   loadPromise = (async () => {
     await configureTensorFlow();
+
     await Promise.all([
-      faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
       faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
       faceapi.nets.faceExpressionNet.loadFromUri(modelPath),
     ]);
+
+    try {
+      await faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath);
+      activeDetector = 'ssd';
+    } catch (error) {
+      console.warn('[FaceDetection] SSD model unavailable; falling back to TinyFaceDetector.', error);
+      await faceapi.nets.tinyFaceDetector.loadFromUri(modelPath);
+      activeDetector = 'tiny';
+    }
+
     modelsLoaded = true;
     return true;
   })();
@@ -40,9 +53,20 @@ export async function loadFaceModels(modelPath = DETECTION_CONFIG.modelPath) {
 }
 
 export function getDetectorOptions() {
+  if (activeDetector === 'tiny') {
+    return new faceapi.TinyFaceDetectorOptions({
+      inputSize: DETECTION_CONFIG.tinyFaceInputSize,
+      scoreThreshold: DETECTION_CONFIG.tinyFaceScoreThreshold,
+    });
+  }
+
   return new faceapi.SsdMobilenetv1Options({
     minConfidence: DETECTION_CONFIG.minDetectionConfidence,
   });
+}
+
+export function getActiveDetector() {
+  return activeDetector;
 }
 
 export async function runDetection(input) {
