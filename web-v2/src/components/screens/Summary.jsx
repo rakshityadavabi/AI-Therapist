@@ -15,6 +15,7 @@ import { Card } from '../ui/Card';
 import { Pill } from '../ui/Pill';
 import { FlowStepper } from '../FlowStepper';
 import { computeIntegratedRisk, DSM_COLORS } from '@/utils/symptomScoring';
+import { isNegativeEmotion, summarizeFacialSignals, toDisplayEmotion } from '@/utils/emotionAnalysis';
 import { generateEmotionAnalysis, getApiKey } from '@/services/geminiApi';
 import { cn, RISK_COLORS } from '@/lib/utils';
 
@@ -67,6 +68,7 @@ export function Summary({
   photoAnalysisResults,
   freeSpeechResults,
   voiceSymptomResults,
+  patientMeta,
   finalReportText,
   finalCombinedJson,
   onRestart,
@@ -97,7 +99,8 @@ export function Summary({
           answers,
           photoAnalysisResults,
           freeSpeechResults,
-          geminiApiKey
+          geminiApiKey,
+          { voiceSymptomResults, patientMeta }
         );
         if (!cancelled) setAiAnalysis(analysis);
       } catch {
@@ -112,11 +115,16 @@ export function Summary({
     return () => {
       cancelled = true;
     };
-  }, [answers, photoAnalysisResults, freeSpeechResults, finalReportText, geminiApiKey]);
+  }, [answers, photoAnalysisResults, freeSpeechResults, voiceSymptomResults, patientMeta, finalReportText, geminiApiKey]);
 
   const integratedRisk = useMemo(
-    () => computeIntegratedRisk({ voiceSymptomResults, freeSpeechResults, answers }),
-    [voiceSymptomResults, freeSpeechResults, answers]
+    () => computeIntegratedRisk({ voiceSymptomResults, freeSpeechResults, answers, photoAnalysisResults }),
+    [voiceSymptomResults, freeSpeechResults, answers, photoAnalysisResults]
+  );
+
+  const facialSummary = useMemo(
+    () => finalCombinedJson?.facialSummary || summarizeFacialSignals(answers, photoAnalysisResults),
+    [finalCombinedJson, answers, photoAnalysisResults]
   );
 
   const photoData = useMemo(() => {
@@ -211,20 +219,26 @@ export function Summary({
         });
     }
 
-    if (answers?.length) {
-      const fearfulCount = answers.filter((a) => a.emotionSnapshot?.predominantEmotion === 'Fearful').length;
-      const sadCount = answers.filter((a) => a.emotionSnapshot?.predominantEmotion === 'Sad').length;
-      if (fearfulCount > answers.length * 0.3)
+    if (facialSummary.available) {
+      if (facialSummary.negativeAffectRatio > 0.35)
         insights.push({
-          label: 'Facial affect — fear',
-          value: `Fearful expression in ${fearfulCount}/${answers.length} responses — consistent with anxiety presentation`,
+          label: 'Facial affect',
+          value: `${Math.round(facialSummary.negativeAffectRatio * 100)}% negative-affect signal across ${facialSummary.sampleCount} samples; dominant expression ${toDisplayEmotion(facialSummary.dominantEmotion)}`,
           color: '#c2453f',
         });
-      if (sadCount > answers.length * 0.3)
+      else if (facialSummary.positiveAffectRatio > 0.45)
         insights.push({
-          label: 'Facial affect — sadness',
-          value: `Sad affect in ${sadCount}/${answers.length} responses — congruent with depressed-mood endorsement`,
-          color: '#3580a3',
+          label: 'Facial affect',
+          value: `${Math.round(facialSummary.positiveAffectRatio * 100)}% positive-affect signal across ${facialSummary.sampleCount} samples`,
+          color: '#4a9d7c',
+        });
+    } else if (answers?.length) {
+      const negativeCount = answers.filter((a) => isNegativeEmotion(a.emotionSnapshot?.predominantEmotion)).length;
+      if (negativeCount > answers.length * 0.3)
+        insights.push({
+          label: 'Facial affect',
+          value: `Negative expression snapshot in ${negativeCount}/${answers.length} responses`,
+          color: '#dc7a45',
         });
     }
 
@@ -236,7 +250,7 @@ export function Summary({
       });
 
     return insights;
-  }, [voiceSymptomResults, freeSpeechResults, answers]);
+  }, [voiceSymptomResults, freeSpeechResults, answers, facialSummary]);
 
   const riskColor = RISK_COLORS[integratedRisk.level];
   const riskBg = RISK_BG[integratedRisk.level];
@@ -254,6 +268,9 @@ export function Summary({
           <p className="mt-2 text-[var(--color-muted)]">
             Generated {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()} · multi-modal
             screening overview · for clinician reference.
+          </p>
+          <p className="mt-1 text-xs text-[var(--color-faint)]">
+            UHID: {patientMeta?.uhid ? patientMeta.uhid : 'Skipped'} · no patient record is stored by this app.
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -427,7 +444,7 @@ export function Summary({
         )}
       </motion.section>
 
-      {!aiAnalysis && freeSpeechResults && (
+      {freeSpeechResults && (
         <Card className="p-6 sm:p-7 mb-10">
           <header className="flex items-center gap-2 mb-4">
             <Mic className="h-5 w-5 text-[var(--color-primary)]" />
@@ -469,7 +486,7 @@ export function Summary({
             <StatTile value={photoData.totalPhotos} label="Photos captured" />
             <StatTile value={photoData.successfulAnalysis} label="Successful analysis" />
             <StatTile value={`${Math.round(photoData.averageConfidence * 100)}%`} label="Avg confidence" />
-            <StatTile value={photoData.photos.length} label="Total frames" />
+            <StatTile value={`${Math.round((facialSummary.negativeAffectRatio || 0) * 100)}%`} label="Negative affect" />
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {photoData.photos.map((p) => (
@@ -482,7 +499,7 @@ export function Summary({
                   {p.processedEmotion?.faceDetected ? (
                     <span className="flex items-center gap-1.5">
                       <span>{getEmotionIcon(p.processedEmotion.emotion)}</span>
-                      <span className="capitalize font-medium text-[var(--color-ink)]">{p.processedEmotion.emotion}</span>
+                      <span className="capitalize font-medium text-[var(--color-ink)]">{toDisplayEmotion(p.processedEmotion.emotion)}</span>
                       <span className="text-[var(--color-muted)]">· {Math.round(p.processedEmotion.confidence * 100)}%</span>
                     </span>
                   ) : (
@@ -517,8 +534,8 @@ export function Summary({
                 {a.answer}
               </Pill>
               <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-muted)]">
-                <span>{getEmotionIcon(a.emotionSnapshot?.predominantEmotion || 'Neutral')}</span>
-                <span className="capitalize">{a.emotionSnapshot?.predominantEmotion || 'Neutral'}</span>
+                <span>{getEmotionIcon(a.emotionAggregate?.dominantEmotion || a.emotionSnapshot?.predominantEmotion || 'Neutral')}</span>
+                <span className="capitalize">{toDisplayEmotion(a.emotionAggregate?.dominantEmotion || a.emotionSnapshot?.predominantEmotion || 'Neutral')}</span>
               </span>
             </li>
           ))}
@@ -528,8 +545,10 @@ export function Summary({
       <div className="rounded-[12px] bg-white border border-[var(--color-border-soft)] px-6 py-5 text-xs text-[var(--color-muted)] leading-relaxed">
         <span className="font-semibold text-[var(--color-ink)]">Medical disclaimer:</span> This is a screening
         demo for educational and research prototyping purposes only. It is not a diagnostic or medical device.
-        All data is processed locally and never uploaded. If you have mental-health concerns, please consult a
-        qualified healthcare professional immediately.
+        Browser speech transcription and facial inference run locally. If a Gemini API key is configured,
+        response text and derived screening signals may be sent to Gemini to generate the final AI narrative.
+        This app does not store patient records or persist session data. If you have mental-health concerns,
+        please consult a qualified healthcare professional immediately.
       </div>
     </div>
   );

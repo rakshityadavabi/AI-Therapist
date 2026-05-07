@@ -39,6 +39,22 @@ export function countWords(text) {
 export function computeSentiment(text) {
   if (!text || !text.trim()) return { score: 0, label: 'Neutral' };
 
+  const positivePhrases = [
+    'no problem', 'no problems', 'not a problem', 'not worried', 'not anxious',
+    'not depressed', 'not stressed', 'doing okay', 'doing well', 'feeling okay',
+    'feeling better', 'feel supported', 'have support', 'sleeping well',
+    'managing well', 'coping well', 'in control', 'things are better',
+  ];
+
+  const negativePhrases = [
+    'not good', 'not okay', 'not fine', 'not doing well', 'do not feel good',
+    "don't feel good", 'feeling down', 'feel down', 'feeling hopeless',
+    'feel hopeless', 'lost interest', 'no interest', 'cannot sleep',
+    "can't sleep", 'hard to sleep', 'panic attack', 'panic attacks',
+    'want to die', 'better off dead', 'hurt myself', 'harm myself',
+    'no reason to live', 'not want to be here', "don't want to be here",
+  ];
+
   const positiveSet = new Set([
     'good', 'great', 'happy', 'love', 'enjoy', 'wonderful', 'fantastic',
     'amazing', 'excellent', 'nice', 'fine', 'well', 'better', 'best',
@@ -75,62 +91,123 @@ export function computeSentiment(text) {
   const negationContractions = /\b(don'?t|didn'?t|doesn'?t|isn'?t|aren'?t|wasn'?t|weren'?t|won'?t|wouldn'?t|can'?t|couldn'?t|shouldn'?t|haven'?t|hasn'?t|hadn'?t|mustn'?t)\b/i;
 
   const raw = text.toLowerCase();
-  // Tokenise keeping apostrophes so contractions survive
-  const tokens = raw.match(/[a-z']+/g) || [];
+  // Split contrast clauses so the phrase after "but/however" carries more weight.
+  const clauses = raw
+    .split(/\b(?:but|however|though|although)\b/i)
+    .map(clause => clause.trim())
+    .filter(Boolean);
 
-  let posCount = 0;
-  let negCount = 0;
+  let positiveWeight = 0;
+  let negativeWeight = 0;
+  const protectiveSignals = [];
+  const distressSignals = [];
 
-  // Track whether a negator is "active" — it stays active for up to 3
-  // tokens (a common window in simple negation handling).
-  let negWindow = 0;
+  // Phrase-level evidence prevents isolated words from dominating the result.
+  const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const phraseRegex = phrase => new RegExp(`(^|\\b)${escapeRegExp(phrase)}(\\b|$)`, 'i');
 
-  tokens.forEach(token => {
-    const clean = token.replace(/[^a-z]/g, '');
+  clauses.forEach((clause, clauseIndex) => {
+    const clauseWeight = clauses.length > 1 && clauseIndex === clauses.length - 1 ? 1.35 : 1;
 
-    // Check if the raw token is a negation contraction
-    if (negationContractions.test(token)) {
-      negWindow = 3; // activate negation for the next few words
-      return;
-    }
-
-    if (negators.has(clean)) {
-      negWindow = 3;
-      return;
-    }
-
-    const isPos = positiveSet.has(clean);
-    const isNeg = negativeSet.has(clean);
-
-    if (isPos || isNeg) {
-      const flipped = negWindow > 0; // negation is active
-
-      if (isPos) {
-        if (flipped) negCount++;
-        else posCount++;
+    positivePhrases.forEach(phrase => {
+      if (phraseRegex(phrase).test(clause)) {
+        positiveWeight += 1.5 * clauseWeight;
+        protectiveSignals.push(phrase);
       }
-      if (isNeg) {
-        if (flipped) posCount++;
-        else negCount++;
+    });
+
+    negativePhrases.forEach(phrase => {
+      if (phraseRegex(phrase).test(clause)) {
+        negativeWeight += 1.7 * clauseWeight;
+        distressSignals.push(phrase);
+      }
+    });
+
+    const tokens = clause.match(/[a-z']+/g) || [];
+    let negWindow = 0;
+
+    tokens.forEach((token, tokenIndex) => {
+      const clean = token.replace(/[^a-z]/g, '');
+
+      if (negationContractions.test(token)) {
+        negWindow = 3;
+        return;
       }
 
-      negWindow = 0; // reset after hitting a sentiment word
-    } else {
-      // non-sentiment word: decrement the negation window
-      if (negWindow > 0) negWindow--;
-    }
+      if (negators.has(clean)) {
+        negWindow = 3;
+        return;
+      }
+
+      const isPos = positiveSet.has(clean);
+      const isNeg = negativeSet.has(clean);
+
+      if (isPos || isNeg) {
+        const flipped = negWindow > 0;
+        const previous = tokens[Math.max(0, tokenIndex - 1)] || '';
+        const intensity = ['very', 'extremely', 'really', 'constantly', 'always'].includes(previous) ? 1.35 : 1;
+        const weight = clauseWeight * intensity;
+
+        if (isPos) {
+          if (flipped) {
+            negativeWeight += weight;
+            distressSignals.push(`${token} (negated positive)`);
+          } else {
+            positiveWeight += weight;
+            protectiveSignals.push(token);
+          }
+        }
+
+        if (isNeg) {
+          if (flipped) {
+            positiveWeight += weight;
+            protectiveSignals.push(`${token} (negated distress)`);
+          } else {
+            negativeWeight += weight;
+            distressSignals.push(token);
+          }
+        }
+
+        negWindow = 0;
+      } else if (negWindow > 0) {
+        negWindow--;
+      }
+    });
   });
 
-  const total = posCount + negCount;
-  if (total === 0) return { score: 0, label: 'Neutral' };
+  const total = positiveWeight + negativeWeight;
+  if (total === 0) {
+    return {
+      score: 0,
+      label: 'Neutral',
+      confidence: 0.15,
+      protectiveSignals: [],
+      distressSignals: [],
+      evidencePhrases: [],
+      summary: 'No clear emotional language detected in the transcript.',
+    };
+  }
 
-  const score = parseFloat(((posCount - negCount) / total).toFixed(2));
+  const score = parseFloat(((positiveWeight - negativeWeight) / total).toFixed(2));
+  const hasBothPolarities = positiveWeight > 0 && negativeWeight > 0;
   let label = 'Neutral';
-  if (score > 0.25) label = 'Positive';
+  if (hasBothPolarities && Math.abs(score) < 0.45) label = 'Mixed';
+  else if (score > 0.25) label = 'Positive';
   else if (score < -0.25) label = 'Negative';
   else if (score !== 0) label = 'Mixed';
 
-  return { score, label };
+  const uniqueProtective = [...new Set(protectiveSignals)].slice(0, 6);
+  const uniqueDistress = [...new Set(distressSignals)].slice(0, 6);
+
+  return {
+    score,
+    label,
+    confidence: Number(Math.min(0.9, 0.3 + total / 10).toFixed(2)),
+    protectiveSignals: uniqueProtective,
+    distressSignals: uniqueDistress,
+    evidencePhrases: [...uniqueProtective, ...uniqueDistress].slice(0, 8),
+    summary: `Contextual local sentiment based on ${uniqueProtective.length} protective and ${uniqueDistress.length} distress signal(s).`,
+  };
 }
 
 /**

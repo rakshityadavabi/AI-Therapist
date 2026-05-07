@@ -13,7 +13,7 @@ function getApiKey() {
   );
 }
 
-export async function generateEmotionAnalysis(answers, photoAnalysisResults, freeSpeechResults, apiKey) {
+export async function generateEmotionAnalysis(answers, photoAnalysisResults, freeSpeechResults, apiKey, context = {}) {
   if (!apiKey) throw new Error('Gemini API key is required');
 
   try {
@@ -29,11 +29,19 @@ export async function generateEmotionAnalysis(answers, photoAnalysisResults, fre
             timestamp: p.timestamp,
             questionData: p.questionData || null,
             dimensions: p.dimensions || null,
+            emotionAggregate: p.emotionAggregate || null,
             processedEmotion: p.processedEmotion || null,
-            dataUrl: p.dataUrl || null,
           }))
         : [],
       freeSpeech: freeSpeechResults || null,
+      structuredVoiceSymptoms: context.voiceSymptomResults || null,
+      patient: context.patientMeta
+        ? {
+            uhidProvided: Boolean(context.patientMeta.uhid),
+            uhidSkipped: Boolean(context.patientMeta.skipped),
+            storage: 'not persisted by this app',
+          }
+        : null,
       emotionSummary,
     };
 
@@ -71,11 +79,17 @@ function analyzeEmotions(answers) {
   let emotionCount = 0;
 
   answers.forEach((answer) => {
-    if (answer.emotionSnapshot && answer.emotionSnapshot.predominantEmotion) {
-      const emotion = answer.emotionSnapshot.predominantEmotion;
+    const emotion =
+      answer.emotionAggregate?.dominantEmotion ||
+      answer.emotionSnapshot?.predominantEmotion;
+    const confidence =
+      answer.emotionAggregate?.confidence ??
+      answer.emotionSnapshot?.confidence;
+
+    if (emotion) {
       emotions[emotion] = (emotions[emotion] || 0) + 1;
-      if (answer.emotionSnapshot.confidence) {
-        totalConfidence += answer.emotionSnapshot.confidence;
+      if (confidence) {
+        totalConfidence += confidence;
         emotionCount++;
       }
     }

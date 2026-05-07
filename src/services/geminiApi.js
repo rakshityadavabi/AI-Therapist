@@ -4,6 +4,7 @@
  * This service generates human-readable analysis of mental health screening results
  * using Google's Gemini AI model.
  */
+import { summarizeFacialSignals } from '../utils/emotionAnalysis';
 
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
@@ -14,7 +15,15 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/
  * @param {string} apiKey - Gemini API key
  * @returns {Promise<string>} - Generated analysis text
  */
-export async function generateEmotionAnalysis(answers, photoAnalysisResults, freeSpeechResults, apiKey) {
+export async function generateEmotionAnalysis(
+  answers,
+  photoAnalysisResults,
+  freeSpeechResults,
+  apiKey,
+  voiceSymptomResults = null,
+  patientMeta = null,
+  facialSummaryInput = null
+) {
   if (!apiKey) {
     throw new Error('Gemini API key is required');
   }
@@ -23,25 +32,34 @@ export async function generateEmotionAnalysis(answers, photoAnalysisResults, fre
     // Prepare data for analysis
     const emotionSummary = analyzeEmotions(answers);
     const photoSummary = analyzePhotos(photoAnalysisResults);
+    const facialSummary = facialSummaryInput || summarizeFacialSignals(answers, photoAnalysisResults);
 
     // Build a combined payload object (JSON-friendly)
     const payload = {
       answers: answers || [],
+      voiceSymptomResults: voiceSymptomResults || null,
       photoSummary,
+      facialSummary,
       photos: Array.isArray(photoAnalysisResults) ? photoAnalysisResults.map(p => ({
         id: p.id,
         timestamp: p.timestamp,
         questionData: p.questionData || null,
         dimensions: p.dimensions || null,
         processedEmotion: p.processedEmotion || null,
-        dataUrl: p.dataUrl || null
+        currentEmotion: p.currentEmotion || null,
+        emotionAggregate: p.emotionAggregate || null
       })) : [],
       freeSpeech: freeSpeechResults || null,
-      emotionSummary
+      emotionSummary,
+      patient: patientMeta ? {
+        uhidProvided: Boolean(patientMeta.uhid),
+        uhidSkipped: Boolean(patientMeta.uhidSkipped),
+        storage: patientMeta.storage || 'local-session-only'
+      } : null
     };
 
     // Create prompt for Gemini including the combined JSON payload
-    const prompt = `${createAnalysisPrompt(emotionSummary, photoSummary, answers.length, answers)}\n\n` +
+    const prompt = `${createAnalysisPrompt(emotionSummary, photoSummary, answers.length, answers, facialSummary)}\n\n` +
       `SESSION DATA (JSON):\n${JSON.stringify(payload, null, 2)}`;
 
     const requestBody = {
@@ -151,11 +169,14 @@ function analyzePhotos(photoAnalysisResults) {
  * @param {Array} answers - Complete answers array with question details
  * @returns {string} - Formatted prompt
  */
-function createAnalysisPrompt(emotionSummary, photoSummary, totalQuestions, answers = []) {
+function createAnalysisPrompt(emotionSummary, photoSummary, totalQuestions, answers = [], facialSummary = null) {
   // Extract answer patterns for deeper analysis
   const yesCount = answers.filter(a => a.answer === 'Yes').length;
   const noCount = answers.filter(a => a.answer === 'No').length;
   const unsureCount = answers.filter(a => a.answer === 'Unsure').length;
+  const facialSignalLine = facialSummary?.available
+    ? `Facial aggregate: ${Math.round(facialSummary.negativeAffectRatio * 100)}% negative affect, ${Math.round(facialSummary.neutralRatio * 100)}% neutral, quality ${facialSummary.quality}`
+    : 'Facial aggregate: insufficient facial samples';
 
   return `You are an experienced clinical psychologist providing a comprehensive mental health screening analysis. Your role is to offer empathetic, professional insights while maintaining appropriate boundaries. Please analyze this data with clinical expertise but communicate in an accessible, supportive manner.
 
@@ -165,6 +186,7 @@ function createAnalysisPrompt(emotionSummary, photoSummary, totalQuestions, answ
 • Primary emotion detected: ${emotionSummary.dominantEmotion}
 • Emotional consistency: ${Math.round(emotionSummary.averageConfidence * 100)}% average confidence
 • Emotion patterns observed: ${Object.entries(emotionSummary.emotions).map(([emotion, count]) => `${emotion} (${count} instances)`).join(', ')}
+• ${facialSignalLine}
 
 **FACIAL EXPRESSION ANALYSIS:**
 • Photos captured during session: ${photoSummary.totalPhotos}
@@ -227,9 +249,10 @@ Instructions:
 1. Consider negation (e.g. "not good" is negative, "don't feel great" is negative).
 2. Consider the overall emotional tone and mental health context.
 3. Look at what the person is actually communicating, not just individual word polarity.
+4. Do not label a word as concerning when the surrounding phrase negates or softens it.
 
 Respond with ONLY a JSON object — no explanation, no markdown fences:
-{"score": <float from -1.0 to 1.0>, "label": "<Positive|Negative|Neutral|Mixed>"}`;
+{"score": <float from -1.0 to 1.0>, "label": "<Positive|Negative|Neutral|Mixed>", "confidence": <float from 0 to 1>, "emotionalTone": "<short phrase>", "distressSignals": ["short evidence phrases"], "protectiveSignals": ["short evidence phrases"], "evidencePhrases": ["short evidence phrases"], "summary": "<one sentence rationale>"}`;
 
     const requestBody = {
       contents: [{ parts: [{ text: prompt }] }],
@@ -237,7 +260,32 @@ Respond with ONLY a JSON object — no explanation, no markdown fences:
         temperature: 0.0,
         topK: 1,
         topP: 1.0,
-        maxOutputTokens: 60,
+        maxOutputTokens: 260,
+        responseMimeType: 'application/json',
+        responseJsonSchema: {
+          type: 'object',
+          properties: {
+            score: { type: 'number' },
+            label: { type: 'string', enum: ['Positive', 'Negative', 'Neutral', 'Mixed'] },
+            confidence: { type: 'number' },
+            emotionalTone: { type: 'string' },
+            distressSignals: { type: 'array', items: { type: 'string' } },
+            protectiveSignals: { type: 'array', items: { type: 'string' } },
+            evidencePhrases: { type: 'array', items: { type: 'string' } },
+            summary: { type: 'string' }
+          },
+          required: ['score', 'label', 'confidence', 'summary'],
+          propertyOrdering: [
+            'score',
+            'label',
+            'confidence',
+            'emotionalTone',
+            'distressSignals',
+            'protectiveSignals',
+            'evidencePhrases',
+            'summary'
+          ]
+        },
       }
     };
 
@@ -285,6 +333,14 @@ Respond with ONLY a JSON object — no explanation, no markdown fences:
         ? Math.max(-1, Math.min(1, parseFloat(parsed.score.toFixed(2))))
         : 0,
       label: validLabels.includes(parsed.label) ? parsed.label : 'Neutral',
+      confidence: typeof parsed.confidence === 'number'
+        ? Math.max(0, Math.min(1, parseFloat(parsed.confidence.toFixed(2))))
+        : 0.5,
+      emotionalTone: typeof parsed.emotionalTone === 'string' ? parsed.emotionalTone : '',
+      distressSignals: Array.isArray(parsed.distressSignals) ? parsed.distressSignals.slice(0, 6) : [],
+      protectiveSignals: Array.isArray(parsed.protectiveSignals) ? parsed.protectiveSignals.slice(0, 6) : [],
+      evidencePhrases: Array.isArray(parsed.evidencePhrases) ? parsed.evidencePhrases.slice(0, 8) : [],
+      summary: typeof parsed.summary === 'string' ? parsed.summary : '',
       source: 'ai',
     };
 

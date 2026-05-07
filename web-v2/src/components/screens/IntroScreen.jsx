@@ -39,7 +39,7 @@ export function IntroScreen({ onGetStarted }) {
         </h1>
         <p className="mt-5 text-[17px] sm:text-lg leading-relaxed text-[var(--color-muted)] max-w-2xl mx-auto">
           AI Therapist combines voice analysis, real-time facial emotion detection, and a clinical-style
-          questionnaire to give you a calm, multi-signal snapshot. Everything runs locally on your device.
+          questionnaire to give you a calm, multi-signal snapshot. The app does not store patient records.
         </p>
 
         <div className="mt-9 flex items-center justify-center gap-3 flex-wrap">
@@ -79,9 +79,9 @@ export function IntroScreen({ onGetStarted }) {
       <div className="mt-10 rounded-[12px] bg-[var(--color-primary-soft)]/70 border border-[var(--color-primary-soft)] px-6 py-5 flex items-center gap-3 flex-wrap">
         <Lock className="h-4 w-4 text-[var(--color-primary-hover)] shrink-0" />
         <p className="text-sm text-[var(--color-ink)] leading-relaxed">
-          <span className="font-semibold">Local-only inference.</span>{' '}
+          <span className="font-semibold">Session-only screening.</span>{' '}
           <span className="text-[var(--color-muted)]">
-            No video, audio, or responses leave your browser. Your session clears when this tab closes.
+            Camera inference and browser transcription run locally. If Gemini is configured, response text and derived screening signals may be used for the final AI narrative. Your session clears when this tab closes.
           </span>
         </p>
       </div>

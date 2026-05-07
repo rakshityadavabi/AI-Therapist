@@ -1,3 +1,5 @@
+import { isNegativeEmotion, summarizeFacialSignals } from './emotionAnalysis';
+
 /**
  * symptomScoring.js
  *
@@ -132,6 +134,17 @@ function tokenize(text) {
   return normalize(text).match(/[a-z']+/g) || [];
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function containsPhrase(text, phrase) {
+  const normalizedPhrase = normalize(phrase).trim();
+  if (!normalizedPhrase) return false;
+  const pattern = new RegExp(`(^|[^a-z'])${escapeRegExp(normalizedPhrase)}([^a-z']|$)`, 'i');
+  return pattern.test(text);
+}
+
 /**
  * Check whether the word at `index` in `tokens` is preceded by a negator
  * within a 3-token window.
@@ -191,7 +204,7 @@ export function inferDSMScore(domain, transcript) {
   [0, 1, 2, 3, 4].forEach(level => {
     const phrases = kwBank[level] || [];
     phrases.forEach(phrase => {
-      if (text.includes(phrase)) {
+      if (containsPhrase(text, phrase)) {
         // Check negation by looking at tokens around the phrase start
         const phraseStart = text.indexOf(phrase);
         const approxTokenIndex = tokens.findIndex((_, idx) => {
@@ -216,7 +229,7 @@ export function inferDSMScore(domain, transcript) {
   let adverbBoost = 0;
   Object.entries(SEVERITY_ADVERBS).forEach(([severity, adverbs]) => {
     adverbs.forEach(adv => {
-      if (text.includes(adv)) {
+      if (containsPhrase(text, adv)) {
         const boostMap = { none: -1, slight: 0, mild: 0, moderate: 1, severe: 2 };
         adverbBoost = Math.max(adverbBoost, boostMap[severity] || 0);
       }
@@ -235,8 +248,12 @@ export function inferDSMScore(domain, transcript) {
     inferredLevel = levelScores.lastIndexOf(maxScore);
   }
 
-  // Apply adverb boost (clamped)
-  inferredLevel = Math.min(4, Math.max(0, inferredLevel + adverbBoost));
+  // Apply adverb boost only to actual symptom levels. Positive/no-symptom
+  // matches such as "happy" or "sleep fine" must never become symptoms
+  // because of an unrelated word like "everything" containing "very".
+  if (inferredLevel > 0) {
+    inferredLevel = Math.min(4, Math.max(0, inferredLevel + adverbBoost));
+  }
 
   const LABELS = ['None', 'Slight', 'Mild', 'Moderate', 'Severe'];
   const confidence = maxScore > 0 ? Math.min(1, maxScore / 6) : 0.1;
@@ -266,6 +283,21 @@ function buildReasoning(domain, score, matchDetails, adverbBoost) {
   return text;
 }
 
+function scoreQuestionAnswer(answer) {
+  const value = answer?.answer;
+
+  if (answer?.questionId === 16) {
+    if (value === 'Yes') return 0;
+    if (value === 'No') return 1;
+    if (value === 'Unsure') return 0.5;
+    return 0;
+  }
+
+  if (value === 'Yes') return 1;
+  if (value === 'Unsure') return 0.4;
+  return 0;
+}
+
 // ─── Integrated risk assessment ───────────────────────────────────────────────
 
 /**
@@ -273,7 +305,7 @@ function buildReasoning(domain, score, matchDetails, adverbBoost) {
  *
  * Returns { level: 'Low'|'Moderate'|'Elevated'|'High', score: number, rationale: string[], safetyOverride: boolean }
  */
-export function computeIntegratedRisk({ voiceSymptomResults, freeSpeechResults, answers }) {
+export function computeIntegratedRisk({ voiceSymptomResults, freeSpeechResults, answers, photoAnalysisResults }) {
   const rationale = [];
   let safetyOverride = false;
   let totalScore = 0;
@@ -307,22 +339,34 @@ export function computeIntegratedRisk({ voiceSymptomResults, freeSpeechResults, 
 
   // ── 3. MINI questionnaire Yes-answer ratio (weight 30%) ───────────────────
   if (answers && answers.length > 0) {
-    const yesRatio = answers.filter(a => a.answer === 'Yes').length / answers.length;
-    totalScore += yesRatio * 30;
+    const questionRisk = answers.reduce((sum, answer) => sum + scoreQuestionAnswer(answer), 0) / answers.length;
+    totalScore += questionRisk * 30;
     maxPossible += 30;
-    rationale.push(`Clinical questionnaire: ${answers.filter(a => a.answer === 'Yes').length}/${answers.length} Yes answers`);
+    const supportAnswer = answers.find(a => a.questionId === 16)?.answer;
+    const supportNote = supportAnswer ? `; support item=${supportAnswer}` : '';
+    rationale.push(`Clinical questionnaire weighted risk: ${Math.round(questionRisk * 100)}%${supportNote}`);
   }
 
   // ── 4. Facial emotion data (weight 10%) ───────────────────────────────────
   if (answers && answers.length > 0) {
-    const negativeEmotions = ['Sad', 'Angry', 'Fearful', 'Disgusted'];
-    const negativeCount = answers.filter(a =>
-      negativeEmotions.includes(a.emotionSnapshot?.predominantEmotion)
-    ).length;
-    const emotionRatio = negativeCount / answers.length;
+    const facialSummary = summarizeFacialSignals(answers, photoAnalysisResults);
+    let emotionRatio = facialSummary.available ? facialSummary.negativeAffectRatio : 0;
+
+    if (!facialSummary.available) {
+      const snapshotCount = answers.filter(a => a.emotionSnapshot).length;
+      const negativeCount = answers.filter(a =>
+        isNegativeEmotion(a.emotionSnapshot?.predominantEmotion)
+      ).length;
+      emotionRatio = snapshotCount > 0 ? negativeCount / snapshotCount : 0;
+    }
+
     totalScore += emotionRatio * 10;
     maxPossible += 10;
-    rationale.push(`Facial emotion: ${negativeCount}/${answers.length} negative expressions detected`);
+    rationale.push(
+      facialSummary.available
+        ? `Facial affect: ${Math.round(emotionRatio * 100)}% negative-affect signal across ${facialSummary.sampleCount} samples`
+        : 'Facial affect: limited or unavailable; snapshot fallback used when possible'
+    );
   }
 
   // ── Normalise to 0-100 ────────────────────────────────────────────────────

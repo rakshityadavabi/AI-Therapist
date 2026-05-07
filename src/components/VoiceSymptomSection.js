@@ -567,7 +567,7 @@ const VoiceSymptomSection = ({ onComplete, onSkip }) => {
             <li><strong>Crisis Text Line</strong> — text HOME to 741741</li>
             <li><strong>International Association for Suicide Prevention</strong> — https://www.iasp.info/resources/Crisis_Centres/</li>
           </ul>
-          All your data stays on this device and is never uploaded.
+          No patient record is stored by this demo. If Gemini AI is configured, text responses may be used for report generation.
         </SafetyAlertBody>
       </SafetyAlert>
     );
@@ -679,7 +679,7 @@ const VoiceSymptomSection = ({ onComplete, onSkip }) => {
             aria-label="Live transcription"
             aria-live="polite"
           />
-          <PrivacyNote>🔒 Voice is processed locally and never uploaded.</PrivacyNote>
+          <PrivacyNote>Voice is transcribed in the browser. If Gemini AI is configured, response text may be included in the final AI report.</PrivacyNote>
 
           {/* Score result panel (after scoring) */}
           {phase === 'result' && renderScoreCard()}

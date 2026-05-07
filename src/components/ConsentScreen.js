@@ -216,11 +216,11 @@ const ConsentScreen = ({ onConsent, onDecline }) => {
           Your privacy and data security are our top priorities:
         </Text>
         <BulletList>
-          <BulletItem>All data processing occurs locally in your browser</BulletItem>
-          <BulletItem>No video data or responses are transmitted to external servers</BulletItem>
-          <BulletItem>Emotion detection runs entirely on your device</BulletItem>
-          <BulletItem>Session data is stored temporarily and deleted when you close the browser</BulletItem>
-          <BulletItem>No personal identifying information is collected or stored</BulletItem>
+          <BulletItem>Camera-based emotion detection runs locally in your browser</BulletItem>
+          <BulletItem>No patient record or screening session is stored by this demo</BulletItem>
+          <BulletItem>Optional UHID, if entered, is held only in the current browser session and local export</BulletItem>
+          <BulletItem>If Gemini AI is configured, transcripts, responses, and derived emotion summaries may be sent to Gemini to generate the report</BulletItem>
+          <BulletItem>Raw live video is not uploaded or recorded by the application</BulletItem>
         </BulletList>
       </ContentSection>
 
@@ -276,7 +276,9 @@ const ConsentScreen = ({ onConsent, onDecline }) => {
           I have read and understood the information above. I consent to participate in this 
           mental health screening demonstration. I understand that this is not a medical 
           diagnostic tool and that camera access is required for emotion detection. I acknowledge 
-          that all data processing occurs locally and no information is transmitted externally.
+          that data is held only for this browser session unless I export the report. I understand
+          that when Gemini AI is configured, text responses and derived analysis summaries may be
+          sent to Gemini for report generation.
         </CheckboxLabel>
       </ConsentCheckbox>
 

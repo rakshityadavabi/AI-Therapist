@@ -41,7 +41,7 @@ export function ConsentScreen({ onConsent, onDecline }) {
           A few words before we begin.
         </h1>
         <p className="mt-3 text-[var(--color-muted)] max-w-xl mx-auto">
-          Please review how AI Therapist uses your camera and microphone, and confirm consent.
+          Please review how AI Therapist uses your camera, microphone, and optional Gemini report generation.
         </p>
       </motion.header>
 
@@ -55,17 +55,17 @@ export function ConsentScreen({ onConsent, onDecline }) {
 
         <InfoCard icon={Lock} title="Privacy & data security">
           <ul className="space-y-1.5 list-disc pl-5">
-            <li>All data processing occurs locally in your browser</li>
-            <li>No video, audio, or responses are sent to a server</li>
+            <li>Browser speech transcription and facial inference run locally</li>
+            <li>If Gemini is configured, response text and derived screening signals may be sent to Gemini for the final narrative report</li>
             <li>Emotion detection runs on-device via face-api.js</li>
             <li>Session data is cleared when the tab closes</li>
-            <li>No personally identifying information is collected</li>
+            <li>No patient record is stored by this app</li>
           </ul>
         </InfoCard>
 
         <InfoCard icon={Camera} title="Camera & microphone">
           <p>
-            Your webcam feed is used for live emotion inference and is never recorded or uploaded.
+            Your webcam feed is used for live emotion inference. Captured interview snapshots stay in the active browser session and are not sent to Gemini.
             You can stop the session at any time, and access can be revoked from your browser settings.
           </p>
         </InfoCard>
@@ -101,8 +101,8 @@ export function ConsentScreen({ onConsent, onDecline }) {
             className="mt-1"
           />
           <span className="text-[15px] leading-relaxed text-[var(--color-ink)]">
-            I have read and understood the above. I consent to participate in this demo. I understand
-            camera/mic access is required and that all processing happens on this device.
+            I have read and understood the above. I consent to participate in this demo and understand
+            that camera/mic access is required.
           </span>
         </label>
       </Card>

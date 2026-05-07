@@ -17,7 +17,7 @@ export function QuestionForm({
   canGoNext,
   canGoPrevious,
   isLastQuestion,
-  photoCapture,
+  photoCaptureRef,
   isProcessingPhotos,
 }) {
   const [isCapturingPhoto, setIsCapturingPhoto] = useState(false);
@@ -26,22 +26,24 @@ export function QuestionForm({
     async (answer) => {
       try {
         setIsCapturingPhoto(true);
-        if (photoCapture && photoCapture.capturePhoto) {
-          await photoCapture.capturePhoto({
+        let capturedPhoto = null;
+        if (photoCaptureRef?.current?.capturePhoto) {
+          capturedPhoto = await photoCaptureRef.current.capturePhoto({
             questionNumber: currentQuestionIndex + 1,
+            questionId: question.id,
             questionText: question.text,
             answer,
             timestamp: new Date().toISOString(),
           });
         }
-        onAnswerSelect(answer);
+        onAnswerSelect(answer, capturedPhoto);
       } catch {
         onAnswerSelect(answer);
       } finally {
         setIsCapturingPhoto(false);
       }
     },
-    [photoCapture, currentQuestionIndex, question.text, onAnswerSelect]
+    [photoCaptureRef, currentQuestionIndex, question.id, question.text, onAnswerSelect]
   );
 
   useEffect(() => {

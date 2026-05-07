@@ -1,11 +1,12 @@
 import { Stepper } from './ui/Stepper';
 
-export const FLOW_STEPS = [
-  { id: 'free_speech', label: 'Free speech', icon: '🎤' },
-  { id: 'voice_symptoms', label: 'Symptom Q&A', icon: '🩺' },
-  { id: 'consent', label: 'Consent', icon: '📝' },
-  { id: 'questions', label: 'Interview', icon: '🧠' },
-  { id: 'summary', label: 'Summary', icon: '✨' },
+const FLOW_STEPS = [
+  { id: 'consent', label: 'Consent', icon: 'OK' },
+  { id: 'patient_info', label: 'UHID', icon: 'ID' },
+  { id: 'free_speech', label: 'Free speech', icon: 'Mic' },
+  { id: 'voice_symptoms', label: 'Symptom Q&A', icon: 'Q&A' },
+  { id: 'questions', label: 'Interview', icon: 'Cam' },
+  { id: 'summary', label: 'Summary', icon: 'AI' },
 ];
 
 const ID_TO_INDEX = FLOW_STEPS.reduce((acc, s, i) => ({ ...acc, [s.id]: i }), {});

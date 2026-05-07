@@ -14,6 +14,7 @@ import {
 import { Bar } from 'react-chartjs-2'; // eslint-disable-line no-unused-vars
 import { generateEmotionAnalysis } from '../services/geminiApi';
 import { computeIntegratedRisk, DSM_COLORS } from '../utils/symptomScoring';
+import { normalizeEmotionLabel, summarizeFacialSignals, toDisplayEmotion } from '../utils/emotionAnalysis';
 
 ChartJS.register(
   CategoryScale,
@@ -595,7 +596,7 @@ const DisclaimerBox = styled.div`
  * - Statistical summary
  * - Action buttons for next steps
  */
-const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSymptomResults, finalReportText, finalCombinedJson, onRestart, onExport }) => {
+const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSymptomResults, patientMeta, finalReportText, onRestart, onExport }) => {
   // Gemini AI Analysis state
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [isGeneratingAnalysis, setIsGeneratingAnalysis] = useState(false);
@@ -615,6 +616,7 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
 
   // Emotion icon mapping
   const getEmotionIcon = (emotion) => {
+    const normalized = normalizeEmotionLabel(emotion);
     const icons = {
       'Happy': '😊',
       'Sad': '😢',
@@ -624,7 +626,7 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
       'Surprised': '😲',
       'Neutral': '😐'
     };
-    return icons[emotion] || '😐';
+    return icons[emotion] || icons[toDisplayEmotion(normalized)] || icons.Neutral || 'Neutral';
   };
 
   // Generate AI analysis automatically (unless parent provided finalReportText)
@@ -642,7 +644,15 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
 
     setIsGeneratingAnalysis(true);
     try {
-      const analysis = await generateEmotionAnalysis(answers, photoAnalysisResults, freeSpeechResults, geminiApiKey);
+      const analysis = await generateEmotionAnalysis(
+        answers,
+        photoAnalysisResults,
+        freeSpeechResults,
+        geminiApiKey,
+        voiceSymptomResults,
+        patientMeta,
+        summarizeFacialSignals(answers, photoAnalysisResults)
+      );
       setAiAnalysis(analysis);
     } catch (error) {
       console.error('Error generating analysis:', error);
@@ -657,7 +667,7 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
     if (answers.length > 0) {
       generateAnalysis();
     }
-  }, [answers, photoAnalysisResults, freeSpeechResults, finalReportText]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [answers, photoAnalysisResults, freeSpeechResults, voiceSymptomResults, patientMeta, finalReportText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Process photo analysis data
   const photoAnalysisData = useMemo(() => {
@@ -701,8 +711,8 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
 
   // ── Integrated Risk Assessment ──────────────────────────────────────────────
   const integratedRisk = useMemo(() => {
-    return computeIntegratedRisk({ voiceSymptomResults, freeSpeechResults, answers });
-  }, [voiceSymptomResults, freeSpeechResults, answers]);
+    return computeIntegratedRisk({ voiceSymptomResults, freeSpeechResults, answers, photoAnalysisResults });
+  }, [voiceSymptomResults, freeSpeechResults, answers, photoAnalysisResults]);
 
   // Risk level → color mapping
   const riskColors = { Low: '#27ae60', Moderate: '#e67e22', Elevated: '#e74c3c', High: '#8e1d1d' };
@@ -744,8 +754,10 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
 
     // Emotion insights
     if (answers?.length) {
-      const fearfulCount = answers.filter(a => a.emotionSnapshot?.predominantEmotion === 'Fearful').length;
-      const sadCount = answers.filter(a => a.emotionSnapshot?.predominantEmotion === 'Sad').length;
+      const facialSummary = summarizeFacialSignals(answers, photoAnalysisResults);
+      const fearfulCount = answers.filter(a => normalizeEmotionLabel(a.emotionSnapshot?.predominantEmotion) === 'fearful').length;
+      const sadCount = answers.filter(a => normalizeEmotionLabel(a.emotionSnapshot?.predominantEmotion) === 'sad').length;
+      if (facialSummary.available && facialSummary.negativeAffectRatio > 0.35) insights.push({ label: 'Facial Affect', value: `${Math.round(facialSummary.negativeAffectRatio * 100)}% confidence-weighted negative affect across ${facialSummary.sampleCount} samples`, color: '#e74c3c' });
       if (fearfulCount > answers.length * 0.3) insights.push({ label: 'Facial Affect — Fear', value: `Fearful expression detected in ${fearfulCount}/${answers.length} responses — consistent with anxiety presentation`, color: '#e74c3c' });
       if (sadCount > answers.length * 0.3) insights.push({ label: 'Facial Affect — Sadness', value: `Sad affect in ${sadCount}/${answers.length} responses — congruent with depressed mood endorsement`, color: '#3498db' });
     }
@@ -754,7 +766,7 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
       insights.push({ label: 'Overall Pattern', value: 'No clinically significant markers detected across available modalities.', color: '#27ae60' });
     }
     return insights;
-  }, [voiceSymptomResults, freeSpeechResults, answers]);
+  }, [voiceSymptomResults, freeSpeechResults, answers, photoAnalysisResults]);
 
   return (
     <SummaryContainer>
@@ -766,6 +778,16 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
       </Header>
 
       {/* ══ INTEGRATED RISK ASSESSMENT ══════════════════════════════════════ */}
+      <FullWidthSection role="region" aria-label="Patient identifier">
+        <SectionTitle><Icon>ID</Icon> Patient Identifier</SectionTitle>
+        <div style={{ fontSize: '15px', color: '#333', lineHeight: 1.7 }}>
+          <strong>UHID:</strong>{' '}
+          {patientMeta?.uhid ? patientMeta.uhid : 'Skipped / not provided'}
+          <br />
+          <strong>Storage:</strong> Local browser session only. No patient record is stored by this demo.
+        </div>
+      </FullWidthSection>
+
       <RiskBanner
         $color={riskColors[integratedRisk.level]}
         $bg={riskBgColors[integratedRisk.level]}
@@ -895,15 +917,8 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
         </AnalysisContent>
       </AnalysisSection>
 
-      {/* When AI/conclusive report is present, omit separate charts and photos to present a single conclusive view. */}
-      {!aiAnalysis && (
-        <>
-
-        </>
-      )}
-
       {/* Photo Analysis Results */}
-      {!aiAnalysis && photoAnalysisData.totalPhotos > 0 && (
+      {photoAnalysisData.totalPhotos > 0 && (
         <PhotoAnalysisSection>
           <SectionTitle>
             <Icon>📸</Icon>
@@ -947,7 +962,7 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
                         {getEmotionIcon(photo.processedEmotion.emotion)}
                       </span>
                       <span className="emotion-name">
-                        {photo.processedEmotion.emotion}
+                        {toDisplayEmotion(photo.processedEmotion.emotion)}
                       </span>
                       <span className="emotion-confidence">
                         ({Math.round(photo.processedEmotion.confidence * 100)}%)
@@ -969,7 +984,7 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
         </PhotoAnalysisSection>
       )}
 
-      {!aiAnalysis && photoAnalysisData.totalPhotos === 0 && (
+      {photoAnalysisData.totalPhotos === 0 && (
         <PhotoAnalysisSection>
           <SectionTitle>
             <Icon>📸</Icon>
@@ -986,7 +1001,7 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
         </PhotoAnalysisSection>
       )}
 
-      {!aiAnalysis && (
+      {answers?.length > 0 && (
       <FullWidthSection>
         <SectionTitle>
           <Icon>📝</Icon>
@@ -1002,7 +1017,7 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
                 {answer.answer}
               </AnswerText>
               <EmotionBadge>
-                {getEmotionIcon(answer.emotionSnapshot?.predominantEmotion || 'Neutral')} {answer.emotionSnapshot?.predominantEmotion || 'Neutral'}
+                {getEmotionIcon(answer.emotionAggregate?.dominantEmotion || answer.emotionSnapshot?.predominantEmotion || 'neutral')} {toDisplayEmotion(answer.emotionAggregate?.dominantEmotion || answer.emotionSnapshot?.predominantEmotion || 'neutral')}
               </EmotionBadge>
             </AnswerItem>
           ))}
@@ -1012,7 +1027,6 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
       )}
 
       {/* ── Free Speech Analysis Summary ── */}
-      {!aiAnalysis && (
       <FullWidthSection>
         <SectionTitle>
           <Icon>🎙️</Icon>
@@ -1077,7 +1091,6 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
           </>
         )}
       </FullWidthSection>
-      )}
 
       <ActionButtons>
         <ActionButton onClick={onRestart}>
@@ -1090,7 +1103,8 @@ const Summary = ({ answers, photoAnalysisResults, freeSpeechResults, voiceSympto
 
       <DisclaimerBox>
         <strong>Medical Disclaimer:</strong> This is a screening demo for educational and research prototyping purposes only.
-        It is <em>not</em> a diagnostic or medical device. All data is processed locally and never uploaded.
+        It is <em>not</em> a diagnostic or medical device. No patient record is stored by this demo.
+        If Gemini AI is configured, text responses and derived analysis summaries may be sent to Gemini for report generation.
         If you have mental health concerns, please consult a qualified healthcare professional immediately.
         <br /><br />
         <strong>For clinicians:</strong> This report aggregates multi-modal signals (voice, facial expression, self-report) and should be 

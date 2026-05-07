@@ -291,7 +291,7 @@ const FreeSpeechSection = ({ onComplete, onSkip }) => {
     <Container role="region" aria-label="Free speech voice analysis">
       <Header>
         <Title>Free Speech Analysis</Title>
-        <Subtitle>Speak freely — your voice is processed locally and not uploaded</Subtitle>
+        <Subtitle>Speak freely - transcription stays in this session; Gemini may analyze text if configured</Subtitle>
       </Header>
 
       <PromptCard>
@@ -329,7 +329,7 @@ const FreeSpeechSection = ({ onComplete, onSkip }) => {
       />
 
       <PrivacyNotice>
-        🔒 Voice is processed locally and not uploaded.
+        Voice is transcribed in the browser. If Gemini AI is configured, transcript text may be analyzed for the final report.
       </PrivacyNotice>
 
       {/* Controls */}

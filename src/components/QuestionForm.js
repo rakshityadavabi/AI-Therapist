@@ -246,6 +246,8 @@ const QuestionForm = ({
 
   // Handle answer selection with automatic photo capture
   const handleAnswerClick = useCallback(async (answer) => {
+    let capturedPhoto = null;
+
     try {
       setIsCapturingPhoto(true);
       
@@ -258,18 +260,18 @@ const QuestionForm = ({
           timestamp: new Date().toISOString()
         };
         
-        await photoCapture.capturePhoto(questionData);
+        capturedPhoto = await photoCapture.capturePhoto(questionData);
         console.log('📸 Photo captured for question', questionData.questionNumber, 'with answer:', answer);
       }
       
       // Call the parent's answer select handler
-      onAnswerSelect(answer);
+      onAnswerSelect(answer, capturedPhoto);
       
     } catch (error) {
       console.error('Error capturing photo during answer selection:', error);
       
       // Still proceed with answer selection even if photo capture fails
-      onAnswerSelect(answer);
+      onAnswerSelect(answer, capturedPhoto);
     } finally {
       setIsCapturingPhoto(false);
     }

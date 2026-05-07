@@ -3,6 +3,7 @@ import * as faceapi from 'face-api.js';
 import styled from 'styled-components';
 import { configureTensorFlow } from '../utils/tensorflowConfig';
 import { useCamera } from '../hooks/useCamera';
+import { normalizeEmotionLabel, summarizeEmotionSamples } from '../utils/emotionAnalysis';
 
 const CameraContainer = styled.div`
   position: relative;
@@ -420,7 +421,7 @@ const CaptureIndicator = styled.div`
  * - Real-time emotion detection when models are available
  * - Clear user feedback for all states
  */
-const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) => {
+const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, questionContext, isActive = true }) => {
   // Use the robust camera hook
   const {
     videoRef,
@@ -445,6 +446,16 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
   // Photo capture states
   const [capturedPhotos, setCapturedPhotos] = useState([]);
   const [isCapturing, setIsCapturing] = useState(false);
+  const questionSamplesRef = useRef([]);
+  const currentQuestionIdRef = useRef(questionContext?.questionId ?? null);
+
+  useEffect(() => {
+    const nextQuestionId = questionContext?.questionId ?? null;
+    if (currentQuestionIdRef.current !== nextQuestionId) {
+      currentQuestionIdRef.current = nextQuestionId;
+      questionSamplesRef.current = [];
+    }
+  }, [questionContext?.questionId]);
 
   /**
    * Load face-api.js models independently of camera
@@ -513,13 +524,14 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
         const minConfidence = 0.15; // Lower threshold for better sensitivity
         if (expressions[dominantEmotion] >= minConfidence) {
           const emotion = {
-            emotion: dominantEmotion,
+            emotion: normalizeEmotionLabel(dominantEmotion),
             confidence: expressions[dominantEmotion],
             timestamp: Date.now(),
             allExpressions: expressions
           };
 
           setCurrentEmotion(emotion);
+          questionSamplesRef.current = [...questionSamplesRef.current, emotion].slice(-80);
           
           // Report to parent component
           if (onEmotionDetected) {
@@ -687,6 +699,8 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
         canvas.toBlob(resolve, 'image/jpeg', 0.8);
       });
       
+      const emotionAggregate = summarizeEmotionSamples(questionSamplesRef.current);
+
       // Create photo data object
       const photoData = {
         id: Date.now(),
@@ -698,7 +712,11 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
           height: canvas.height
         },
         questionData,
-        currentEmotion: currentEmotion ? { ...currentEmotion } : null
+        currentEmotion: currentEmotion ? {
+          ...currentEmotion,
+          emotion: normalizeEmotionLabel(currentEmotion.emotion)
+        } : null,
+        emotionAggregate
       };
       // JSON-friendly representation for exporting / sending to AI
       photoData.jsonRepresentation = {
@@ -707,11 +725,25 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
         questionData: photoData.questionData || null,
         dimensions: photoData.dimensions || null,
         currentEmotion: photoData.currentEmotion || null,
+        emotionAggregate: photoData.emotionAggregate || null,
         dataUrl: photoData.dataUrl || null
       };
       
       // Store photo
-      setCapturedPhotos(prev => [...prev, photoData]);
+      setCapturedPhotos(prev => {
+        const questionNumber = questionData?.questionNumber;
+        if (!questionNumber) return [...prev, photoData];
+
+        const existingIndex = prev.findIndex(photo =>
+          photo.questionData?.questionNumber === questionNumber
+        );
+
+        if (existingIndex < 0) return [...prev, photoData];
+
+        const nextPhotos = [...prev];
+        nextPhotos[existingIndex] = photoData;
+        return nextPhotos;
+      });
       
       console.log('📸 Photo captured successfully:', {
         id: photoData.id,
@@ -721,7 +753,7 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
       });
       
       // Notify parent component
-      if (onPhotoCapture) {
+      if (typeof onPhotoCapture === 'function') {
         onPhotoCapture(photoData);
       }
       
@@ -779,7 +811,7 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
           );
           
           emotionData = {
-            emotion: dominantEmotion,
+            emotion: normalizeEmotionLabel(dominantEmotion),
             confidence: expressions[dominantEmotion],
             allExpressions: expressions,
             faceDetected: true
@@ -799,6 +831,8 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
           questionData: photo.questionData || null,
           dimensions: photo.dimensions || null,
           processedEmotion: emotionData,
+          currentEmotion: photo.currentEmotion || null,
+          emotionAggregate: photo.emotionAggregate || null,
           dataUrl: photo.dataUrl || null
         };
 
@@ -825,6 +859,8 @@ const CameraEmotion = ({ onEmotionDetected, onPhotoCapture, isActive = true }) =
             faceDetected: false,
             error: error.message
           },
+          currentEmotion: photo.currentEmotion || null,
+          emotionAggregate: photo.emotionAggregate || null,
           dataUrl: photo.dataUrl || null
         };
 

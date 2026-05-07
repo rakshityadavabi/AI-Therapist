@@ -8,7 +8,9 @@ import ErrorBoundary from './components/ErrorBoundary';
 import IntroScreen from './components/IntroScreen';
 import FreeSpeechSection from './components/FreeSpeechSection';
 import VoiceSymptomSection from './components/VoiceSymptomSection';
+import PatientInfoScreen from './components/PatientInfoScreen';
 import questionsData from './data/questions.json';
+import { summarizeFacialSignals } from './utils/emotionAnalysis';
 
 // Global styles for accessibility and mobile responsiveness
 const GlobalStyle = createGlobalStyle`
@@ -119,6 +121,7 @@ const ProgressFill = styled.div`
 // Application states
 const APP_STATES = {
   INTRO: 'intro',
+  PATIENT_INFO: 'patient_info',
   FREE_SPEECH: 'free_speech',
   VOICE_SYMPTOMS: 'voice_symptoms',
   CONSENT: 'consent',
@@ -145,6 +148,7 @@ const APP_STATES = {
 function App() {
   // Application state
   const [currentState, setCurrentState] = useState(APP_STATES.INTRO);
+  const [patientMeta, setPatientMeta] = useState(null);
   const [freeSpeechResults, setFreeSpeechResults] = useState(null);
   const [voiceSymptomResults, setVoiceSymptomResults] = useState(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -163,6 +167,12 @@ function App() {
 
   // Handle intro "Get Started"
   const handleGetStarted = useCallback(() => {
+    setCurrentState(APP_STATES.CONSENT);
+  }, []);
+
+  // Handle optional UHID entry / skip
+  const handlePatientInfoComplete = useCallback((metadata) => {
+    setPatientMeta(metadata);
     setCurrentState(APP_STATES.FREE_SPEECH);
   }, []);
 
@@ -181,19 +191,19 @@ function App() {
   // Handle voice symptom completion
   const handleVoiceSymptomComplete = useCallback((results) => {
     setVoiceSymptomResults(results);
-    setCurrentState(APP_STATES.CONSENT);
+    setCurrentState(APP_STATES.QUESTIONS);
   }, []);
 
   // Handle voice symptom skip
   const handleVoiceSymptomSkip = useCallback(() => {
     setVoiceSymptomResults(null);
-    setCurrentState(APP_STATES.CONSENT);
+    setCurrentState(APP_STATES.QUESTIONS);
   }, []);
 
   // Handle consent acceptance
   const handleConsent = useCallback(() => {
     try {
-      setCurrentState(APP_STATES.QUESTIONS);
+      setCurrentState(APP_STATES.PATIENT_INFO);
       setError(null);
     } catch (err) {
       setError('Failed to start screening. Please try again.');
@@ -208,15 +218,16 @@ function App() {
   }, []);
 
   // Handle answer selection
-  const handleAnswerSelect = useCallback((answer) => {
+  const handleAnswerSelect = useCallback((answer, capturedPhoto = null) => {
     const currentQuestion = questionsData[currentQuestionIndex];
     
     // Create emotion snapshot from current emotion state
-    const emotionSnapshot = currentEmotion ? {
-      predominantEmotion: currentEmotion.emotion,
-      confidence: currentEmotion.confidence,
-      timestamp: currentEmotion.timestamp,
-      allExpressions: currentEmotion.allExpressions
+    const sourceEmotion = capturedPhoto?.currentEmotion || currentEmotion;
+    const emotionSnapshot = sourceEmotion ? {
+      predominantEmotion: sourceEmotion.emotion,
+      confidence: sourceEmotion.confidence,
+      timestamp: sourceEmotion.timestamp,
+      allExpressions: sourceEmotion.allExpressions
     } : null;
     
     const answerData = {
@@ -224,6 +235,8 @@ function App() {
       questionText: currentQuestion.text,
       answer,
       emotionSnapshot,
+      emotionAggregate: capturedPhoto?.emotionAggregate || null,
+      photoId: capturedPhoto?.id || null,
       timestamp: new Date().toISOString()
     };
 
@@ -263,18 +276,30 @@ function App() {
         // Generate combined Gemini report (if API key exists)
         try {
           const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+          const facialSummary = summarizeFacialSignals(answers, analysisResults || []);
+
           if (apiKey) {
             // Import generateEmotionAnalysis dynamically to avoid top-level coupling
             const { generateEmotionAnalysis } = await import('./services/geminiApi');
-            const report = await generateEmotionAnalysis(answers, analysisResults || [], freeSpeechResults, apiKey);
+            const report = await generateEmotionAnalysis(
+              answers,
+              analysisResults || [],
+              freeSpeechResults,
+              apiKey,
+              voiceSymptomResults,
+              patientMeta,
+              facialSummary
+            );
             setFinalReportText(report);
 
             const combined = {
               timestamp: new Date().toISOString(),
+              patientMeta,
               answers,
               photoAnalysisResults: analysisResults || [],
               freeSpeechResults,
               voiceSymptomResults,
+              facialSummary,
               aiReport: report
             };
 
@@ -283,10 +308,12 @@ function App() {
             // No API key — still prepare combined JSON using local analysis
             const combined = {
               timestamp: new Date().toISOString(),
+              patientMeta,
               answers,
               photoAnalysisResults: analysisResults || [],
               freeSpeechResults,
               voiceSymptomResults,
+              facialSummary,
               aiReport: null
             };
             setFinalCombinedJson(combined);
@@ -305,7 +332,7 @@ function App() {
         setIsProcessingPhotos(false);
       }
     }
-  }, [currentQuestionIndex, answers, freeSpeechResults, voiceSymptomResults]);
+  }, [currentQuestionIndex, answers, freeSpeechResults, voiceSymptomResults, patientMeta]);
 
   const handlePrevious = useCallback(() => {
     if (currentQuestionIndex > 0) {
@@ -318,8 +345,13 @@ function App() {
     setCurrentState(APP_STATES.INTRO);
     setCurrentQuestionIndex(0);
     setAnswers([]);
+    setPatientMeta(null);
     setFreeSpeechResults(null);
     setVoiceSymptomResults(null);
+    setPhotoAnalysisResults([]);
+    setFinalReportText(null);
+    setFinalCombinedJson(null);
+    setCurrentEmotion(null);
     setError(null);
   }, []);
 
@@ -327,11 +359,13 @@ function App() {
     try {
       const exportPayload = finalCombinedJson || {
         timestamp: new Date().toISOString(),
+        patientMeta,
         totalQuestions: questionsData.length,
         answers: answers,
         photoAnalysisResults: photoAnalysisResults,
         freeSpeechResults: freeSpeechResults,
         voiceSymptomResults: voiceSymptomResults,
+        facialSummary: summarizeFacialSignals(answers, photoAnalysisResults),
         summary: {
           yesCount: answers.filter(a => a.answer === 'Yes').length,
           noCount: answers.filter(a => a.answer === 'No').length,
@@ -359,21 +393,23 @@ function App() {
     } catch (err) {
       alert('Failed to export data. Please try again.');
     }
-  }, [answers, finalCombinedJson, finalReportText, freeSpeechResults, photoAnalysisResults, voiceSymptomResults]);
+  }, [answers, finalCombinedJson, finalReportText, freeSpeechResults, patientMeta, photoAnalysisResults, voiceSymptomResults]);
 
   // Calculate progress
   const getProgress = () => {
     switch (currentState) {
       case APP_STATES.INTRO:
         return 0;
-      case APP_STATES.FREE_SPEECH:
-        return 5;
-      case APP_STATES.VOICE_SYMPTOMS:
-        return 12;
       case APP_STATES.CONSENT:
-        return 18;
+        return 5;
+      case APP_STATES.PATIENT_INFO:
+        return 10;
+      case APP_STATES.FREE_SPEECH:
+        return 15;
+      case APP_STATES.VOICE_SYMPTOMS:
+        return 25;
       case APP_STATES.QUESTIONS:
-        return 18 + ((currentQuestionIndex + 1) / questionsData.length) * 72;
+        return 30 + ((currentQuestionIndex + 1) / questionsData.length) * 60;
       case APP_STATES.SUMMARY:
         return 100;
       default:
@@ -430,6 +466,19 @@ function App() {
                 <IntroScreen onGetStarted={handleGetStarted} />
               )}
 
+              {currentState === APP_STATES.CONSENT && (
+                <ConsentScreen
+                  onConsent={handleConsent}
+                  onDecline={handleConsentDecline}
+                />
+              )}
+
+              {currentState === APP_STATES.PATIENT_INFO && (
+                <PatientInfoScreen
+                  onComplete={handlePatientInfoComplete}
+                />
+              )}
+
               {currentState === APP_STATES.FREE_SPEECH && (
                 <FreeSpeechSection
                   onComplete={handleFreeSpeechComplete}
@@ -444,19 +493,17 @@ function App() {
                 />
               )}
 
-              {currentState === APP_STATES.CONSENT && (
-                <ConsentScreen
-                  onConsent={handleConsent}
-                  onDecline={handleConsentDecline}
-                />
-              )}
-
               {currentState === APP_STATES.QUESTIONS && currentQuestion && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                   <CameraEmotion 
                     onModelLoad={() => {}} // Add model load handler if needed
                     onPhotoCapture={photoCaptureRef.current}
                     onEmotionDetected={setCurrentEmotion}
+                    questionContext={{
+                      questionId: currentQuestion.id,
+                      questionNumber: currentQuestionIndex + 1,
+                      questionText: currentQuestion.text
+                    }}
                   />
                   <QuestionForm
                     question={currentQuestion}
@@ -482,8 +529,8 @@ function App() {
                   photoAnalysisResults={photoAnalysisResults}
                   freeSpeechResults={freeSpeechResults}
                   voiceSymptomResults={voiceSymptomResults}
+                  patientMeta={patientMeta}
                   finalReportText={finalReportText}
-                  finalCombinedJson={finalCombinedJson}
                   onRestart={handleRestart}
                   onExport={handleExport}
                 />

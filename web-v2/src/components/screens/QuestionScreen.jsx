@@ -14,7 +14,7 @@ export function QuestionScreen({
   canGoNext,
   canGoPrevious,
   isLastQuestion,
-  photoCapture,
+  photoCaptureRef,
   isProcessingPhotos,
   setCurrentEmotion,
 }) {
@@ -59,12 +59,20 @@ export function QuestionScreen({
             canGoNext={canGoNext}
             canGoPrevious={canGoPrevious}
             isLastQuestion={isLastQuestion}
-            photoCapture={photoCapture}
+            photoCaptureRef={photoCaptureRef}
             isProcessingPhotos={isProcessingPhotos}
           />
         </div>
         <div className="lg:col-span-5 order-first lg:order-last">
-          <CameraEmotion onPhotoCapture={photoCapture} onEmotionDetected={setCurrentEmotion} />
+          <CameraEmotion
+            photoCaptureRef={photoCaptureRef}
+            onEmotionDetected={setCurrentEmotion}
+            questionContext={{
+              questionId: question.id,
+              questionNumber: currentQuestionIndex + 1,
+              questionText: question.text,
+            }}
+          />
         </div>
       </div>
     </div>

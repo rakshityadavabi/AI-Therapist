@@ -258,7 +258,7 @@ export function VoiceSymptomSection({ onComplete, onSkip }) {
           Structured symptom assessment
         </h1>
         <p className="mt-2 text-[var(--color-muted)]">
-          Answer each question by speaking — responses are transcribed and scored locally.
+          Answer each question by speaking — responses are transcribed in the browser, scored locally, and may be summarized in the Gemini final report when configured.
         </p>
       </header>
 
@@ -310,7 +310,7 @@ export function VoiceSymptomSection({ onComplete, onSkip }) {
             aria-live="polite"
             className="mt-3 w-full min-h-[120px] resize-y rounded-[10px] border border-[var(--color-border-soft)] bg-[var(--color-surface)]/40 px-4 py-3 text-[15px] leading-relaxed text-[var(--color-ink)] focus:outline-none focus:ring-4 focus:ring-[var(--color-primary-ring)] focus:border-[var(--color-primary)] scrollbar-thin"
           />
-          <p className="mt-1 text-[11px] text-[var(--color-faint)] text-center">🔒 Voice processed locally and never uploaded.</p>
+          <p className="mt-1 text-[11px] text-[var(--color-faint)] text-center">Voice scoring runs locally; transcript text may be included in the final AI report when Gemini is configured.</p>
 
           <AnimatePresence>
             {phase === 'result' && scoreResult && <ScoreCard result={scoreResult} />}

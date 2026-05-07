@@ -92,7 +92,7 @@ export function FreeSpeechSection({ onComplete, onSkip }) {
           Tell me how you have been.
         </h1>
         <p className="mt-3 text-[15px] sm:text-base text-[var(--color-muted)] max-w-xl mx-auto">
-          Speak freely for up to 2 minutes. Your voice is transcribed and analyzed locally.
+          Speak freely for up to 2 minutes. Your voice is transcribed in the browser; response text may be included in the Gemini final report when configured.
         </p>
       </motion.header>
 

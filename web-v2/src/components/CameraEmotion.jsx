@@ -2,6 +2,7 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import * as faceapi from 'face-api.js';
 import { Camera as CameraIcon, RefreshCcw, Sparkles, Aperture } from 'lucide-react';
 import { configureTensorFlow } from '@/utils/tensorflowConfig';
+import { normalizeEmotionLabel, summarizeEmotionSamples } from '@/utils/emotionAnalysis';
 import { useCamera } from '@/hooks/useCamera';
 import { Card } from './ui/Card';
 import { StatusDot } from './ui/StatusDot';
@@ -18,7 +19,7 @@ const EMOTION_ICONS = {
   neutral: '😐',
 };
 
-export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = true }) {
+export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionContext, isActive = true }) {
   const {
     videoRef,
     isLoading: cameraLoading,
@@ -36,6 +37,7 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
   const [detectionEnabled, setDetectionEnabled] = useState(true);
   const [capturedPhotos, setCapturedPhotos] = useState([]);
   const [isCapturing, setIsCapturing] = useState(false);
+  const questionSamplesRef = useRef([]);
 
   const loadModels = useCallback(async () => {
     try {
@@ -66,17 +68,19 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
 
       if (detections.length > 0) {
         const expressions = detections[0].expressions;
-        const dominantEmotion = Object.keys(expressions).reduce((a, b) =>
+        const rawDominantEmotion = Object.keys(expressions).reduce((a, b) =>
           expressions[a] > expressions[b] ? a : b
         );
+        const dominantEmotion = normalizeEmotionLabel(rawDominantEmotion);
 
-        if (expressions[dominantEmotion] >= 0.15) {
+        if (expressions[rawDominantEmotion] >= 0.15) {
           const emotion = {
             emotion: dominantEmotion,
-            confidence: expressions[dominantEmotion],
+            confidence: expressions[rawDominantEmotion],
             timestamp: Date.now(),
             allExpressions: expressions,
           };
+          questionSamplesRef.current = [...questionSamplesRef.current.slice(-29), emotion];
           setCurrentEmotion(emotion);
           onEmotionDetected?.(emotion);
         }
@@ -110,6 +114,10 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
     return () => clearInterval(interval);
   }, [detectEmotions, detectionEnabled, cameraActive]);
 
+  useEffect(() => {
+    questionSamplesRef.current = [];
+  }, [questionContext?.questionId]);
+
   const capturePhoto = useCallback(
     async (questionData = {}) => {
       if (!videoRef.current || !cameraActive || isCapturing) return null;
@@ -129,8 +137,9 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
           blob: photoBlob,
           dataUrl: canvas.toDataURL('image/jpeg', 0.8),
           dimensions: { width: canvas.width, height: canvas.height },
-          questionData,
+          questionData: { ...(questionContext || {}), ...questionData },
           currentEmotion: currentEmotion ? { ...currentEmotion } : null,
+          emotionAggregate: summarizeEmotionSamples(questionSamplesRef.current),
         };
         photoData.jsonRepresentation = {
           id: photoData.id,
@@ -138,11 +147,14 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
           questionData: photoData.questionData,
           dimensions: photoData.dimensions,
           currentEmotion: photoData.currentEmotion,
-          dataUrl: photoData.dataUrl,
+          emotionAggregate: photoData.emotionAggregate,
         };
 
-        setCapturedPhotos((prev) => [...prev, photoData]);
-        onPhotoCapture?.(photoData);
+        setCapturedPhotos((prev) => {
+          const questionNumber = photoData.questionData?.questionNumber;
+          if (!questionNumber) return [...prev, photoData];
+          return [...prev.filter((p) => p.questionData?.questionNumber !== questionNumber), photoData];
+        });
         return photoData;
       } catch {
         return null;
@@ -150,12 +162,16 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
         setIsCapturing(false);
       }
     },
-    [videoRef, cameraActive, isCapturing, currentEmotion, onPhotoCapture]
+    [videoRef, cameraActive, isCapturing, currentEmotion, questionContext]
   );
 
   useEffect(() => {
-    if (onPhotoCapture) onPhotoCapture.capturePhoto = capturePhoto;
-  }, [capturePhoto, onPhotoCapture]);
+    if (!photoCaptureRef) return;
+    photoCaptureRef.current = {
+      ...(photoCaptureRef.current || {}),
+      capturePhoto,
+    };
+  }, [capturePhoto, photoCaptureRef]);
 
   const processCapturedPhotos = useCallback(async () => {
     if (!isModelLoaded || capturedPhotos.length === 0) return null;
@@ -177,12 +193,13 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
         let emotionData;
         if (detections.length > 0) {
           const expressions = detections[0].expressions;
-          const dominantEmotion = Object.keys(expressions).reduce((a, b) =>
+          const rawDominantEmotion = Object.keys(expressions).reduce((a, b) =>
             expressions[a] > expressions[b] ? a : b
           );
+          const dominantEmotion = normalizeEmotionLabel(rawDominantEmotion);
           emotionData = {
             emotion: dominantEmotion,
-            confidence: expressions[dominantEmotion],
+            confidence: expressions[rawDominantEmotion],
             allExpressions: expressions,
             faceDetected: true,
           };
@@ -199,8 +216,9 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
             timestamp: photo.timestamp,
             questionData: photo.questionData,
             dimensions: photo.dimensions,
+            currentEmotion: photo.currentEmotion,
+            emotionAggregate: photo.emotionAggregate,
             processedEmotion: emotionData,
-            dataUrl: photo.dataUrl,
           },
         });
       } catch (error) {
@@ -220,8 +238,9 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
             timestamp: photo.timestamp,
             questionData: photo.questionData,
             dimensions: photo.dimensions,
+            currentEmotion: photo.currentEmotion,
+            emotionAggregate: photo.emotionAggregate,
             processedEmotion: emotionData,
-            dataUrl: photo.dataUrl,
           },
         });
       }
@@ -230,11 +249,13 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
   }, [isModelLoaded, capturedPhotos]);
 
   useEffect(() => {
-    if (onPhotoCapture) {
-      onPhotoCapture.processCapturedPhotos = processCapturedPhotos;
-      onPhotoCapture.getCapturedPhotos = () => capturedPhotos;
-    }
-  }, [processCapturedPhotos, capturedPhotos, onPhotoCapture]);
+    if (!photoCaptureRef) return;
+    photoCaptureRef.current = {
+      ...(photoCaptureRef.current || {}),
+      processCapturedPhotos,
+      getCapturedPhotos: () => capturedPhotos,
+    };
+  }, [processCapturedPhotos, capturedPhotos, photoCaptureRef]);
 
   const statusLabel = cameraError
     ? 'Camera error'
@@ -362,7 +383,7 @@ export function CameraEmotion({ onEmotionDetected, onPhotoCapture, isActive = tr
           </button>
         </div>
 
-        <p className="text-[11px] text-[var(--color-faint)]">Frames analysed locally · never uploaded.</p>
+        <p className="text-[11px] text-[var(--color-faint)]">Frames analysed locally; snapshots remain in this browser session.</p>
       </div>
     </Card>
   );

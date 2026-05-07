@@ -147,9 +147,10 @@ const IntroScreen = ({ onGetStarted }) => {
           Privacy
         </SectionHeading>
         <BulletList>
-          <BulletItem>All processing happens locally in your browser.</BulletItem>
-          <BulletItem>No audio, video, or responses are uploaded to any server.</BulletItem>
-          <BulletItem>Session data is cleared when the page is closed or refreshed.</BulletItem>
+          <BulletItem>Camera emotion detection runs locally in your browser.</BulletItem>
+          <BulletItem>No patient record is stored by this demo.</BulletItem>
+          <BulletItem>If Gemini AI is configured, text responses and derived summaries may be sent to Gemini for report generation.</BulletItem>
+          <BulletItem>Session data is cleared when the page is closed or refreshed unless you export the report.</BulletItem>
         </BulletList>
       </InfoSection>
 

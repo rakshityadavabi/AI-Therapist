@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import App from './App';
 
 // Mock MediaDevices for testing environment
@@ -24,14 +24,15 @@ jest.mock('face-api.js', () => ({
   resizeResults: jest.fn()
 }));
 
-test('renders consent screen on initial load', () => {
+test('renders intro screen on initial load', () => {
   render(<App />);
-  const consentTitle = screen.getByText(/Mental Health Screening/i);
-  expect(consentTitle).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: /Mental Health Screening/i })).toBeInTheDocument();
+  expect(screen.getByText(/Get Started/i)).toBeInTheDocument();
 });
 
-test('displays consent form elements', () => {
+test('displays consent form after intro', () => {
   render(<App />);
+  fireEvent.click(screen.getByText(/Get Started/i));
   
   // Check for consent checkbox
   const consentCheckbox = screen.getByRole('checkbox');
@@ -41,6 +42,29 @@ test('displays consent form elements', () => {
   const startButton = screen.getByText(/Start Screening/i);
   expect(startButton).toBeInTheDocument();
   expect(startButton).toBeDisabled();
+});
+
+test('moves to optional UHID screen after consent', () => {
+  render(<App />);
+  fireEvent.click(screen.getByText(/Get Started/i));
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByText(/Start Screening/i));
+
+  expect(screen.getByText(/Patient Identifier/i)).toBeInTheDocument();
+  expect(screen.getByText(/Skip UHID/i)).toBeInTheDocument();
+});
+
+test('skipping voice sections reaches camera-backed questions', () => {
+  render(<App />);
+  fireEvent.click(screen.getByText(/Get Started/i));
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByText(/Start Screening/i));
+  fireEvent.click(screen.getByText(/Skip UHID/i));
+  fireEvent.click(screen.getByText(/Skip to Questionnaire/i));
+  fireEvent.click(screen.getByRole('button', { name: /Skip structured symptom assessment/i }));
+
+  expect(screen.getByText(/Question 1 of/i)).toBeInTheDocument();
+  expect(screen.getByText(/Photo Capture Status/i)).toBeInTheDocument();
 });
 
 test('application has proper accessibility structure', () => {
