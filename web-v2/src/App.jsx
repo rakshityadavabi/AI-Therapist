@@ -109,6 +109,10 @@ export default function App() {
         if (analysisResults) setPhotoAnalysisResults(analysisResults);
       }
 
+      // Close any still-open behavioural segment, then snapshot the session.
+      photoCaptureRef.current?.endQuestion?.({ reason: 'session-end' });
+      const behavioralSession = photoCaptureRef.current?.getSessionSummary?.() ?? null;
+
       try {
         const apiKey = getApiKey();
         if (apiKey) {
@@ -116,7 +120,8 @@ export default function App() {
             answers,
             analysisResults || [],
             freeSpeechResults,
-            apiKey
+            apiKey,
+            { behavioralSession }
           );
           setFinalReportText(report);
           setFinalCombinedJson({
@@ -125,6 +130,7 @@ export default function App() {
             photoAnalysisResults: analysisResults || [],
             freeSpeechResults,
             voiceSymptomResults,
+            behavioralSession,
             aiReport: report,
           });
         } else {
@@ -134,6 +140,7 @@ export default function App() {
             photoAnalysisResults: analysisResults || [],
             freeSpeechResults,
             voiceSymptomResults,
+            behavioralSession,
             aiReport: null,
           });
         }

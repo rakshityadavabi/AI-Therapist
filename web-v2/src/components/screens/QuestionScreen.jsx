@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Pill } from '../ui/Pill';
 import { FlowStepper } from '../FlowStepper';
 import { CameraEmotion } from '../CameraEmotion';
@@ -18,6 +19,21 @@ export function QuestionScreen({
   isProcessingPhotos,
   setCurrentEmotion,
 }) {
+  // Bracket each question with a behavioural segment. End on unmount or
+  // when the active question changes — survives navigating back/forward.
+  useEffect(() => {
+    if (!photoCapture?.beginQuestion) return undefined;
+    photoCapture.beginQuestion({
+      id: question.id,
+      index: currentQuestionIndex,
+      text: question.text,
+      category: question.category,
+    });
+    return () => {
+      photoCapture.endQuestion?.({ reason: 'navigated' });
+    };
+  }, [photoCapture, question.id, question.text, question.category, currentQuestionIndex]);
+
   return (
     <div className="max-w-[1280px] mx-auto px-5 sm:px-8 py-8 sm:py-10">
       <FlowStepper currentStateId="questions" className="mb-8" />

@@ -13,12 +13,21 @@ function getApiKey() {
   );
 }
 
-export async function generateEmotionAnalysis(answers, photoAnalysisResults, freeSpeechResults, apiKey) {
+export async function generateEmotionAnalysis(
+  answers,
+  photoAnalysisResults,
+  freeSpeechResults,
+  apiKey,
+  extras = {}
+) {
   if (!apiKey) throw new Error('Gemini API key is required');
+
+  const { behavioralSession = null } = extras;
 
   try {
     const emotionSummary = analyzeEmotions(answers);
     const photoSummary = analyzePhotos(photoAnalysisResults);
+    const behavioralSummary = summariseBehavioral(behavioralSession);
 
     const payload = {
       answers: answers || [],
@@ -30,15 +39,41 @@ export async function generateEmotionAnalysis(answers, photoAnalysisResults, fre
             questionData: p.questionData || null,
             dimensions: p.dimensions || null,
             processedEmotion: p.processedEmotion || null,
+            behavioral: p.behavioral || null,
             dataUrl: p.dataUrl || null,
           }))
         : [],
       freeSpeech: freeSpeechResults || null,
       emotionSummary,
+      behavioralSession: behavioralSession
+        ? {
+            generatedAt: behavioralSession.generatedAt,
+            durationMs: behavioralSession.durationMs,
+            samples: behavioralSession.samples,
+            composite: behavioralSession.composite,
+            qualitative: behavioralSession.qualitative,
+            metrics: {
+              blinkRate: behavioralSession.blinkRate,
+              smileFrequency: behavioralSession.smileFrequency,
+              movementScore: behavioralSession.movementScore,
+              expressionVariability: behavioralSession.expressionVariability,
+              gazeStability: behavioralSession.gazeStability,
+              sadnessTrend: behavioralSession.sadnessTrend,
+            },
+            perQuestion: (behavioralSession.perQuestion || []).map((q) => ({
+              meta: q.meta,
+              compositeState: q.compositeState,
+              qualitative: q.qualitative,
+              shifts: q.shifts,
+              summary: q.summary,
+              answer: q.answer ?? null,
+            })),
+          }
+        : null,
     };
 
     const prompt =
-      `${createAnalysisPrompt(emotionSummary, photoSummary, answers.length, answers)}\n\n` +
+      `${createAnalysisPrompt(emotionSummary, photoSummary, behavioralSummary, answers.length, answers)}\n\n` +
       `SESSION DATA (JSON):\n${JSON.stringify(payload, null, 2)}`;
 
     const requestBody = {
@@ -110,10 +145,43 @@ function analyzePhotos(photoAnalysisResults) {
   };
 }
 
-function createAnalysisPrompt(emotionSummary, photoSummary, totalQuestions, answers = []) {
+function summariseBehavioral(session) {
+  if (!session) return null;
+  return {
+    composite: session.composite,
+    qualitative: session.qualitative,
+    durationMs: session.durationMs,
+    samples: session.samples,
+    metrics: {
+      blinkRate: session.blinkRate,
+      smileFrequency: session.smileFrequency,
+      movementScore: session.movementScore,
+      expressionVariability: session.expressionVariability,
+      gazeStability: session.gazeStability,
+      sadnessTrend: session.sadnessTrend,
+    },
+    perQuestion: session.perQuestion || [],
+  };
+}
+
+function createAnalysisPrompt(emotionSummary, photoSummary, behavioralSummary, totalQuestions, answers = []) {
   const yesCount = answers.filter((a) => a.answer === 'Yes').length;
   const noCount = answers.filter((a) => a.answer === 'No').length;
   const unsureCount = answers.filter((a) => a.answer === 'Unsure').length;
+
+  const behavioralBlock = behavioralSummary
+    ? `
+**BEHAVIORAL OBSERVATION (derived from facial landmarks over time):**
+• Composite state: ${behavioralSummary.composite?.label || 'unavailable'} (confidence ${Math.round((behavioralSummary.composite?.confidence ?? 0) * 100)}%)
+• Blink rate: ${Math.round(behavioralSummary.metrics.blinkRate)} blinks/min (${behavioralSummary.qualitative?.blink})
+• Smile activity: ${Math.round(behavioralSummary.metrics.smileFrequency * 100)}% of frames (${behavioralSummary.qualitative?.smile})
+• Head movement: ${Math.round(behavioralSummary.metrics.movementScore * 100)}% (${behavioralSummary.qualitative?.movement})
+• Expression variability: ${Math.round(behavioralSummary.metrics.expressionVariability * 100)}% (${behavioralSummary.qualitative?.variability})
+• Gaze stability: ${Math.round(behavioralSummary.metrics.gazeStability * 100)}% (${behavioralSummary.qualitative?.gaze})
+• Sustained sadness signal: ${Math.round(behavioralSummary.metrics.sadnessTrend * 100)}%
+• Per-question shifts captured: ${behavioralSummary.perQuestion?.length ?? 0}
+`
+    : '';
 
   return `You are an experienced clinical psychologist providing a comprehensive mental health screening analysis. Your role is to offer empathetic, professional insights while maintaining appropriate boundaries. Please analyze this data with clinical expertise but communicate in an accessible, supportive manner.
 
@@ -130,17 +198,17 @@ function createAnalysisPrompt(emotionSummary, photoSummary, totalQuestions, answ
 • Photos captured during session: ${photoSummary.totalPhotos}
 • Successfully analyzed expressions: ${photoSummary.successfulAnalysis}/${photoSummary.totalPhotos}
 • Facial expression confidence: ${Math.round(photoSummary.averageConfidence * 100)}%
-
+${behavioralBlock}
 Please provide a comprehensive clinical assessment with these sections:
 1. OVERALL EMOTIONAL STATE SUMMARY
-2. KEY CLINICAL OBSERVATIONS
-3. EMOTIONAL-BEHAVIORAL ALIGNMENT
+2. KEY CLINICAL OBSERVATIONS (incorporate behavioral signals — blink rate, gaze, movement, smile activity — alongside raw expressions; favour the temporal/composite read over single-frame labels)
+3. EMOTIONAL-BEHAVIORAL ALIGNMENT (note where verbal answers and behavioral signals agree or diverge per question)
 4. AREAS FOR ATTENTION
 5. STRENGTHS AND RESILIENCE FACTORS
 6. CLINICAL RECOMMENDATIONS
 7. SUPPORTIVE VALIDATION
 
-Use professional clinical language that remains warm and accessible. Emphasize that this is a screening tool and recommend professional consultation for comprehensive mental health care.`;
+Treat behavioral metrics as soft, supportive signals — never as diagnosis. Use professional clinical language that remains warm and accessible. Emphasize that this is a screening tool and recommend professional consultation for comprehensive mental health care.`;
 }
 
 export async function analyzeSentimentWithAI(text) {

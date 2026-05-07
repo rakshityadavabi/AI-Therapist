@@ -26,12 +26,17 @@ export function QuestionForm({
     async (answer) => {
       try {
         setIsCapturingPhoto(true);
+        let segment = null;
+        if (photoCapture?.endQuestion) {
+          segment = photoCapture.endQuestion({ answer, reason: 'answered' });
+        }
         if (photoCapture && photoCapture.capturePhoto) {
           await photoCapture.capturePhoto({
             questionNumber: currentQuestionIndex + 1,
             questionText: question.text,
             answer,
             timestamp: new Date().toISOString(),
+            behavioralSegment: segment,
           });
         }
         onAnswerSelect(answer);
