@@ -4,10 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-vite.ps1 dev",
-    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-vite.ps1 build",
+    "dev": "node ./scripts/run-vite.mjs dev",
+    "build": "node ./scripts/run-vite.mjs build",
     "lint": "eslint .",
-    "preview": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/run-vite.ps1 preview"
+    "preview": "node ./scripts/run-vite.mjs preview"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",
