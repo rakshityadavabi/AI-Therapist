@@ -51,6 +51,19 @@ export function useCamera() {
 
       const strategies = [
         {
+          name: 'HD',
+          constraints: {
+            video: {
+              width: { ideal: 1280, min: 640 },
+              height: { ideal: 720, min: 360 },
+              frameRate: { ideal: 30, min: 15 },
+              facingMode: 'user',
+              ...(preferredDeviceId && { deviceId: { exact: preferredDeviceId } }),
+            },
+            audio: false,
+          },
+        },
+        {
           name: 'High Quality',
           constraints: {
             video: {
@@ -58,7 +71,6 @@ export function useCamera() {
               height: { ideal: 480, min: 240 },
               frameRate: { ideal: 30, min: 15 },
               facingMode: 'user',
-              ...(preferredDeviceId && { deviceId: { exact: preferredDeviceId } }),
             },
             audio: false,
           },

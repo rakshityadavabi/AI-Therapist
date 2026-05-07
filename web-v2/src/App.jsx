@@ -89,6 +89,8 @@ export default function App() {
         answer,
         emotionSnapshot,
         emotionAggregate: capturedPhoto?.emotionAggregate || null,
+        behavioral: capturedPhoto?.behavioral || null,
+        behavioralSegment: capturedPhoto?.questionData?.behavioralSegment || null,
         photoId: capturedPhoto?.id || null,
         timestamp: new Date().toISOString(),
       };
@@ -120,6 +122,10 @@ export default function App() {
         if (analysisResults) setPhotoAnalysisResults(analysisResults);
       }
 
+      // Close any still-open behavioural segment, then snapshot the session.
+      photoCaptureRef.current?.endQuestion?.({ reason: 'session-end' });
+      const behavioralSession = photoCaptureRef.current?.getSessionSummary?.() ?? null;
+
       try {
         const apiKey = getApiKey();
         if (apiKey) {
@@ -128,7 +134,7 @@ export default function App() {
             analysisResults || [],
             freeSpeechResults,
             apiKey,
-            { voiceSymptomResults, patientMeta }
+            { voiceSymptomResults, patientMeta, behavioralSession }
           );
           const facialSummary = summarizeFacialSignals(answers, analysisResults || []);
           setFinalReportText(report);
@@ -145,6 +151,7 @@ export default function App() {
             facialSummary,
             freeSpeechResults,
             voiceSymptomResults,
+            behavioralSession,
             aiReport: report,
           });
         } else {
@@ -162,6 +169,7 @@ export default function App() {
             facialSummary,
             freeSpeechResults,
             voiceSymptomResults,
+            behavioralSession,
             aiReport: null,
           });
         }

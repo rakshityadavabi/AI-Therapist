@@ -18,6 +18,7 @@ export function QuestionScreen({
   isProcessingPhotos,
   setCurrentEmotion,
 }) {
+
   return (
     <div className="max-w-[1280px] mx-auto px-5 sm:px-8 py-8 sm:py-10">
       <FlowStepper currentStateId="questions" className="mb-8" />

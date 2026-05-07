@@ -1,23 +1,49 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import * as faceapi from 'face-api.js';
-import { Camera as CameraIcon, RefreshCcw, Sparkles, Aperture } from 'lucide-react';
-import { configureTensorFlow } from '@/utils/tensorflowConfig';
-import { normalizeEmotionLabel, summarizeEmotionSamples } from '@/utils/emotionAnalysis';
+import { Camera as CameraIcon, RefreshCcw, Sparkles, Aperture, Info } from 'lucide-react';
 import { useCamera } from '@/hooks/useCamera';
+import {
+  loadFaceModels,
+  runDetection,
+  validateFaceQuality,
+  pickDominantEmotion,
+  DETECTION_CONFIG,
+} from '@/utils/faceDetection';
+import { BehavioralTracker } from '@/utils/behavioralAnalysis';
+import { normalizeEmotionLabel, summarizeEmotionSamples } from '@/utils/emotionAnalysis';
 import { Card } from './ui/Card';
 import { StatusDot } from './ui/StatusDot';
 import { Pill } from './ui/Pill';
 import { cn } from '@/lib/utils';
 
-const EMOTION_ICONS = {
-  happy: '😊',
-  sad: '😢',
-  angry: '😠',
-  fearful: '😰',
-  disgusted: '🤢',
-  surprised: '😲',
-  neutral: '😐',
+const STATE_TONE = {
+  positive: 'primary',
+  warn: 'amber',
+  negative: 'coral',
+  neutral: 'outline',
 };
+
+const STATE_ICONS = {
+  engaged: '😊',
+  sad: '😢',
+  mildly_sad: '🙁',
+  anxious: '😬',
+  stressed: '😰',
+  subdued: '😐',
+  uneasy: '😕',
+  calm: '🙂',
+  observing: '·',
+};
+
+const SCAN_TIPS = [
+  'Use good, even lighting on your face',
+  'Face the camera directly',
+  'Keep your face centered in the frame',
+  'Only one person should be visible',
+];
+
+const fmtPct = (v) => `${Math.round(Math.max(0, Math.min(1, v ?? 0)) * 100)}%`;
+const fmtRate = (v) => `${Math.round(v ?? 0)}/min`;
 
 export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionContext, isActive = true }) {
   const {
@@ -31,22 +57,23 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
   } = useCamera();
 
   const canvasRef = useRef(null);
+  const trackerRef = useRef(null);
+  if (trackerRef.current == null) trackerRef.current = new BehavioralTracker();
+  const detectionTimerRef = useRef(null);
+  const inFlightRef = useRef(false);
+  const questionSamplesRef = useRef([]);
+
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [modelError, setModelError] = useState(null);
-  const [currentEmotion, setCurrentEmotion] = useState(null);
+  const [snapshot, setSnapshot] = useState(null);
+  const [qualityHint, setQualityHint] = useState(null);
   const [detectionEnabled, setDetectionEnabled] = useState(true);
   const [capturedPhotos, setCapturedPhotos] = useState([]);
   const [isCapturing, setIsCapturing] = useState(false);
-  const questionSamplesRef = useRef([]);
 
   const loadModels = useCallback(async () => {
     try {
-      await configureTensorFlow();
-      const modelPath = '/models';
-      await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
-        faceapi.nets.faceExpressionNet.loadFromUri(modelPath),
-      ]);
+      await loadFaceModels();
       setIsModelLoaded(true);
       setModelError(null);
     } catch (error) {
@@ -55,50 +82,80 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
     }
   }, []);
 
+  const drawOverlay = useCallback((detections, displaySize) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    faceapi.matchDimensions(canvas, displaySize);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!detections || detections.length === 0) return;
+    const resized = faceapi.resizeResults(detections, displaySize);
+    faceapi.draw.drawDetections(canvas, resized);
+    faceapi.draw.drawFaceLandmarks(canvas, resized);
+  }, []);
+
   const detectEmotions = useCallback(async () => {
+    if (inFlightRef.current) return;
     if (!isModelLoaded || !cameraActive || !videoRef.current || !detectionEnabled) return;
 
+    const video = videoRef.current;
+    if (video.videoWidth === 0 || video.videoHeight === 0) return;
+
+    inFlightRef.current = true;
     try {
-      const video = videoRef.current;
-      if (video.videoWidth === 0 || video.videoHeight === 0) return;
+      const detections = await runDetection(video);
+      const displaySize = { width: video.videoWidth, height: video.videoHeight };
+      drawOverlay(detections, displaySize);
 
-      const detections = await faceapi
-        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.3 }))
-        .withFaceExpressions();
-
-      if (detections.length > 0) {
-        const expressions = detections[0].expressions;
-        const rawDominantEmotion = Object.keys(expressions).reduce((a, b) =>
-          expressions[a] > expressions[b] ? a : b
-        );
-        const dominantEmotion = normalizeEmotionLabel(rawDominantEmotion);
-
-        if (expressions[rawDominantEmotion] >= 0.15) {
-          const emotion = {
-            emotion: dominantEmotion,
-            confidence: expressions[rawDominantEmotion],
-            timestamp: Date.now(),
-            allExpressions: expressions,
-          };
-          questionSamplesRef.current = [...questionSamplesRef.current.slice(-29), emotion];
-          setCurrentEmotion(emotion);
-          onEmotionDetected?.(emotion);
-        }
-
-        if (canvasRef.current) {
-          const canvas = canvasRef.current;
-          const displaySize = { width: video.videoWidth, height: video.videoHeight };
-          faceapi.matchDimensions(canvas, displaySize);
-          const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          const resized = faceapi.resizeResults(detections, displaySize);
-          faceapi.draw.drawFaceExpressions(canvas, resized);
-        }
+      const quality = validateFaceQuality(detections, displaySize.width, displaySize.height);
+      if (!quality.ok) {
+        setQualityHint(quality.hint);
+        trackerRef.current.noteEmptyFrame();
+        return;
       }
+      setQualityHint(null);
+
+      const live = trackerRef.current.ingest({
+        box: quality.face.detection.box,
+        landmarks: quality.face.landmarks,
+        expressions: quality.face.expressions,
+        timestamp: Date.now(),
+      });
+
+      setSnapshot(live);
+      const sample = {
+        emotion: normalizeEmotionLabel(live.dominantEmotion),
+        confidence: live.averagedExpressions?.[live.dominantEmotion] ?? live.composite.confidence,
+        timestamp: Date.now(),
+        allExpressions: live.averagedExpressions,
+      };
+      questionSamplesRef.current = [...questionSamplesRef.current.slice(-29), sample];
+
+      const payload = {
+        emotion: live.composite.state,
+        compositeLabel: live.composite.label,
+        compositeTone: live.composite.tone,
+        confidence: live.composite.confidence,
+        timestamp: Date.now(),
+        rawDominantEmotion: live.dominantEmotion,
+        allExpressions: live.averagedExpressions,
+        metrics: {
+          blinkRate: live.blinkRate,
+          smileFrequency: live.smileFrequency,
+          movementScore: live.movementScore,
+          expressionVariability: live.expressionVariability,
+          gazeStability: live.gazeStability,
+          sadnessTrend: live.sadnessTrend,
+        },
+        qualitative: live.qualitative,
+      };
+      if (live.composite.state !== 'observing') onEmotionDetected?.(payload);
     } catch {
       /* swallow occasional detection errors */
+    } finally {
+      inFlightRef.current = false;
     }
-  }, [isModelLoaded, cameraActive, detectionEnabled, onEmotionDetected, videoRef]);
+  }, [isModelLoaded, cameraActive, detectionEnabled, onEmotionDetected, videoRef, drawOverlay]);
 
   useEffect(() => {
     if (isActive) startCamera();
@@ -109,14 +166,36 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
   }, [loadModels]);
 
   useEffect(() => {
-    if (!detectionEnabled || !cameraActive) return;
-    const interval = setInterval(detectEmotions, 500);
-    return () => clearInterval(interval);
-  }, [detectEmotions, detectionEnabled, cameraActive]);
+    if (!detectionEnabled || !cameraActive || !isModelLoaded) return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      await detectEmotions();
+      if (cancelled) return;
+      detectionTimerRef.current = setTimeout(tick, DETECTION_CONFIG.detectionIntervalMs);
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (detectionTimerRef.current) clearTimeout(detectionTimerRef.current);
+    };
+  }, [detectEmotions, detectionEnabled, cameraActive, isModelLoaded]);
 
   useEffect(() => {
     questionSamplesRef.current = [];
   }, [questionContext?.questionId]);
+
+  useEffect(() => {
+    if (!questionContext?.questionId) return undefined;
+    trackerRef.current.beginQuestion({
+      id: questionContext.questionId,
+      index: questionContext.questionNumber ? questionContext.questionNumber - 1 : undefined,
+      text: questionContext.questionText,
+    });
+    return () => {
+      trackerRef.current.endQuestion({ reason: 'navigated' });
+    };
+  }, [questionContext?.questionId, questionContext?.questionNumber, questionContext?.questionText]);
 
   const capturePhoto = useCallback(
     async (questionData = {}) => {
@@ -130,15 +209,39 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
         canvas.height = video.videoHeight;
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        const photoBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+        const photoBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+        const behavioral = snapshot
+          ? {
+              composite: snapshot.composite,
+              metrics: {
+                blinkRate: snapshot.blinkRate,
+                smileFrequency: snapshot.smileFrequency,
+                movementScore: snapshot.movementScore,
+                expressionVariability: snapshot.expressionVariability,
+                gazeStability: snapshot.gazeStability,
+                sadnessTrend: snapshot.sadnessTrend,
+              },
+              qualitative: snapshot.qualitative,
+            }
+          : null;
+
         const photoData = {
           id: Date.now(),
           timestamp: new Date().toISOString(),
           blob: photoBlob,
-          dataUrl: canvas.toDataURL('image/jpeg', 0.8),
+          dataUrl: canvas.toDataURL('image/jpeg', 0.85),
           dimensions: { width: canvas.width, height: canvas.height },
           questionData: { ...(questionContext || {}), ...questionData },
-          currentEmotion: currentEmotion ? { ...currentEmotion } : null,
+          currentEmotion: snapshot
+            ? {
+                emotion: snapshot.composite.state,
+                compositeLabel: snapshot.composite.label,
+                confidence: snapshot.composite.confidence,
+                rawDominantEmotion: snapshot.dominantEmotion,
+                allExpressions: snapshot.averagedExpressions,
+              }
+            : null,
+          behavioral,
           emotionAggregate: summarizeEmotionSamples(questionSamplesRef.current),
         };
         photoData.jsonRepresentation = {
@@ -148,6 +251,7 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
           dimensions: photoData.dimensions,
           currentEmotion: photoData.currentEmotion,
           emotionAggregate: photoData.emotionAggregate,
+          behavioral,
         };
 
         setCapturedPhotos((prev) => {
@@ -162,7 +266,7 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
         setIsCapturing(false);
       }
     },
-    [videoRef, cameraActive, isCapturing, currentEmotion, questionContext]
+    [videoRef, cameraActive, isCapturing, snapshot, questionContext]
   );
 
   useEffect(() => {
@@ -173,11 +277,18 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
     };
   }, [capturePhoto, photoCaptureRef]);
 
+  const beginQuestion = useCallback((meta) => trackerRef.current.beginQuestion(meta ?? {}), []);
+  const endQuestion = useCallback((meta) => trackerRef.current.endQuestion(meta ?? {}), []);
+  const getSessionSummary = useCallback(() => trackerRef.current.getSessionSummary(), []);
+  const getLiveSnapshot = useCallback(() => trackerRef.current.snapshot(), []);
+  const resetSession = useCallback(() => trackerRef.current.reset(), []);
+
   const processCapturedPhotos = useCallback(async () => {
     if (!isModelLoaded || capturedPhotos.length === 0) return null;
     const analysisResults = [];
 
     for (const photo of capturedPhotos) {
+      let emotionData;
       try {
         const img = new Image();
         await new Promise((resolve, reject) => {
@@ -186,64 +297,44 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
           img.src = photo.dataUrl;
         });
 
-        const detections = await faceapi
-          .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
-          .withFaceExpressions();
-
-        let emotionData;
+        const detections = await runDetection(img);
         if (detections.length > 0) {
           const expressions = detections[0].expressions;
-          const rawDominantEmotion = Object.keys(expressions).reduce((a, b) =>
-            expressions[a] > expressions[b] ? a : b
-          );
-          const dominantEmotion = normalizeEmotionLabel(rawDominantEmotion);
+          const dominant = pickDominantEmotion(expressions);
           emotionData = {
-            emotion: dominantEmotion,
-            confidence: expressions[rawDominantEmotion],
+            emotion: normalizeEmotionLabel(dominant?.emotion ?? 'unknown'),
+            confidence: dominant?.score ?? 0,
             allExpressions: expressions,
             faceDetected: true,
           };
         } else {
           emotionData = { emotion: 'unknown', confidence: 0, allExpressions: {}, faceDetected: false };
         }
-
-        analysisResults.push({
-          ...photo,
-          processedEmotion: emotionData,
-          processingTimestamp: new Date().toISOString(),
-          jsonRepresentation: {
-            id: photo.id,
-            timestamp: photo.timestamp,
-            questionData: photo.questionData,
-            dimensions: photo.dimensions,
-            currentEmotion: photo.currentEmotion,
-            emotionAggregate: photo.emotionAggregate,
-            processedEmotion: emotionData,
-          },
-        });
       } catch (error) {
-        const emotionData = {
+        emotionData = {
           emotion: 'error',
           confidence: 0,
           allExpressions: {},
           faceDetected: false,
           error: error.message,
         };
-        analysisResults.push({
-          ...photo,
-          processedEmotion: emotionData,
-          processingTimestamp: new Date().toISOString(),
-          jsonRepresentation: {
-            id: photo.id,
-            timestamp: photo.timestamp,
-            questionData: photo.questionData,
-            dimensions: photo.dimensions,
-            currentEmotion: photo.currentEmotion,
-            emotionAggregate: photo.emotionAggregate,
-            processedEmotion: emotionData,
-          },
-        });
       }
+
+      analysisResults.push({
+        ...photo,
+        processedEmotion: emotionData,
+        processingTimestamp: new Date().toISOString(),
+        jsonRepresentation: {
+          id: photo.id,
+          timestamp: photo.timestamp,
+          questionData: photo.questionData,
+          dimensions: photo.dimensions,
+          currentEmotion: photo.currentEmotion,
+          emotionAggregate: photo.emotionAggregate,
+          processedEmotion: emotionData,
+          behavioral: photo.behavioral ?? null,
+        },
+      });
     }
     return analysisResults;
   }, [isModelLoaded, capturedPhotos]);
@@ -254,8 +345,25 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
       ...(photoCaptureRef.current || {}),
       processCapturedPhotos,
       getCapturedPhotos: () => capturedPhotos,
+      beginQuestion,
+      endQuestion,
+      getSessionSummary,
+      getLiveSnapshot,
+      resetSession,
     };
-  }, [processCapturedPhotos, capturedPhotos, photoCaptureRef]);
+  }, [
+    processCapturedPhotos,
+    capturedPhotos,
+    photoCaptureRef,
+    beginQuestion,
+    endQuestion,
+    getSessionSummary,
+    getLiveSnapshot,
+    resetSession,
+  ]);
+
+  const composite = snapshot?.composite;
+  const compositeTone = composite ? STATE_TONE[composite.tone] || 'outline' : 'outline';
 
   const statusLabel = cameraError
     ? 'Camera error'
@@ -267,15 +375,37 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
     ? 'Camera ready · AI offline'
     : !isModelLoaded
     ? 'Loading AI…'
-    : 'AI ready';
+    : qualityHint
+    ? 'Adjusting…'
+    : !snapshot || (snapshot.samples ?? 0) < 6
+    ? 'Calibrating…'
+    : 'Tracking';
 
-  const statusTone = cameraError ? 'coral' : !cameraActive || cameraLoading ? 'amber' : 'primary';
+  const statusTone = cameraError
+    ? 'coral'
+    : !cameraActive || cameraLoading || qualityHint
+    ? 'amber'
+    : 'primary';
+
+  const showTips = !cameraActive || !isModelLoaded || !!qualityHint;
+
+  const metricChips = useMemo(() => {
+    if (!snapshot || (snapshot.samples ?? 0) < 4) return [];
+    const q = snapshot.qualitative;
+    return [
+      { label: 'Blink', value: fmtRate(snapshot.blinkRate), qual: q.blink },
+      { label: 'Smile', value: fmtPct(snapshot.smileFrequency), qual: q.smile },
+      { label: 'Movement', value: fmtPct(snapshot.movementScore), qual: q.movement },
+      { label: 'Variability', value: fmtPct(snapshot.expressionVariability), qual: q.variability },
+      { label: 'Gaze', value: fmtPct(snapshot.gazeStability), qual: q.gaze },
+    ];
+  }, [snapshot]);
 
   return (
     <Card className="overflow-hidden sticky top-[80px]">
       <div className="px-5 py-3 flex items-center gap-2 border-b border-[var(--color-border-soft)]">
         <CameraIcon className="h-4 w-4 text-[var(--color-muted)]" />
-        <span className="text-sm font-semibold text-[var(--color-ink)]">Live emotion preview</span>
+        <span className="text-sm font-semibold text-[var(--color-ink)]">Behavioral preview</span>
         <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-muted)]">
           <StatusDot tone={statusTone} pulse={cameraLoading || (!isModelLoaded && cameraActive)} />
           {statusLabel}
@@ -312,14 +442,20 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
           </div>
         )}
 
-        {currentEmotion && cameraActive && isModelLoaded && (
+        {qualityHint && cameraActive && isModelLoaded && (
+          <div className="absolute inset-x-3 top-3 flex justify-center">
+            <Pill tone="amber" className="bg-amber-50/95 shadow-sm normal-case tracking-normal">
+              <Info className="h-3 w-3" />
+              <span>{qualityHint}</span>
+            </Pill>
+          </div>
+        )}
+
+        {composite && cameraActive && isModelLoaded && !qualityHint && (
           <div className="absolute top-3 right-3">
-            <Pill tone="primary" className="bg-white/95 shadow-sm">
-              <span>{EMOTION_ICONS[currentEmotion.emotion] || '·'}</span>
-              <span className="capitalize">{currentEmotion.emotion}</span>
-              <span className="text-[var(--color-muted)] font-normal normal-case tracking-normal">
-                · {Math.round(currentEmotion.confidence * 100)}%
-              </span>
+            <Pill tone={compositeTone} className="bg-white/95 shadow-sm">
+              <span>{STATE_ICONS[composite.state] || '·'}</span>
+              <span className="capitalize">{composite.label}</span>
             </Pill>
           </div>
         )}
@@ -342,21 +478,51 @@ export function CameraEmotion({ onEmotionDetected, photoCaptureRef, questionCont
       </div>
 
       <div className="p-5 space-y-3">
-        {currentEmotion && cameraActive && (
+        {composite && cameraActive && (
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <span className="eyebrow text-[var(--color-muted)]">Detection confidence</span>
+              <span className="eyebrow text-[var(--color-muted)]">Behavioral state</span>
               <span className="text-xs font-semibold text-[var(--color-ink)]">
-                {Math.round(currentEmotion.confidence * 100)}%
+                Sadness trend {fmtPct(snapshot.sadnessTrend)}
               </span>
             </div>
             <div className="h-1.5 bg-[var(--color-border-soft)] rounded-full overflow-hidden">
               <div
                 className="h-full bg-[var(--color-primary)] transition-[width] duration-300 ease-out"
-                style={{ width: `${Math.round(currentEmotion.confidence * 100)}%` }}
+                style={{ width: fmtPct(snapshot.sadnessTrend) }}
               />
             </div>
           </div>
+        )}
+
+        {metricChips.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+            {metricChips.map((m) => (
+              <div
+                key={m.label}
+                className="rounded-md border border-[var(--color-border-soft)] bg-white px-2.5 py-1.5"
+              >
+                <div className="text-[10px] uppercase tracking-[0.06em] font-semibold text-[var(--color-muted)]">
+                  {m.label}
+                </div>
+                <div className="flex items-baseline justify-between gap-2 mt-0.5">
+                  <span className="font-semibold text-[var(--color-ink)] tabular-nums">{m.value}</span>
+                  <span className="text-[10px] text-[var(--color-faint)] capitalize">{m.qual}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showTips && (
+          <ul className="space-y-1 text-[11px] text-[var(--color-faint)]">
+            {SCAN_TIPS.map((tip) => (
+              <li key={tip} className="flex items-start gap-1.5">
+                <span aria-hidden className="mt-[3px] h-1 w-1 rounded-full bg-[var(--color-muted)] shrink-0" />
+                <span>{tip}</span>
+              </li>
+            ))}
+          </ul>
         )}
 
         <div className="flex items-center gap-2">

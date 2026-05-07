@@ -27,6 +27,10 @@ export function QuestionForm({
       try {
         setIsCapturingPhoto(true);
         let capturedPhoto = null;
+        let segment = null;
+        if (photoCaptureRef?.current?.endQuestion) {
+          segment = photoCaptureRef.current.endQuestion({ answer, reason: 'answered' });
+        }
         if (photoCaptureRef?.current?.capturePhoto) {
           capturedPhoto = await photoCaptureRef.current.capturePhoto({
             questionNumber: currentQuestionIndex + 1,
@@ -34,6 +38,7 @@ export function QuestionForm({
             questionText: question.text,
             answer,
             timestamp: new Date().toISOString(),
+            behavioralSegment: segment,
           });
         }
         onAnswerSelect(answer, capturedPhoto);
