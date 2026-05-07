@@ -1,0 +1,20 @@
+[
+  { "id": 1, "category": "anxiety", "text": "In the past month, have you been bothered by feeling nervous, anxious, or on edge?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 2, "category": "anxiety", "text": "In the past month, have you been bothered by not being able to stop or control worrying?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 3, "category": "anxiety", "text": "In the past month, have you been bothered by worrying too much about different things?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 4, "category": "anxiety", "text": "In the past month, have you had trouble relaxing?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 5, "category": "anxiety", "text": "In the past month, have you been so restless that it's hard to sit still?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 6, "category": "depression", "text": "Over the past two weeks, have you been bothered by little interest or pleasure in doing things?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 7, "category": "depression", "text": "Over the past two weeks, have you been bothered by feeling down, depressed, or hopeless?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 8, "category": "depression", "text": "Over the past two weeks, have you had trouble falling or staying asleep, or sleeping too much?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 9, "category": "depression", "text": "Over the past two weeks, have you been bothered by feeling tired or having little energy?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 10, "category": "depression", "text": "Over the past two weeks, have you been bothered by poor appetite or overeating?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 11, "category": "depression", "text": "Over the past two weeks, have you been bothered by feeling bad about yourself or that you are a failure?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 12, "category": "depression", "text": "Over the past two weeks, have you had trouble concentrating on things?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 13, "category": "mood", "text": "Have you been moving or speaking so slowly that other people could have noticed?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 14, "category": "mood", "text": "Have you been feeling so fidgety or restless that you have been moving around a lot more than usual?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 15, "category": "general", "text": "Over the past month, have these feelings significantly interfered with your daily activities?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 16, "category": "general", "text": "Do you currently feel that you have adequate support from family or friends?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 17, "category": "stress", "text": "In the past month, how often have you felt overwhelmed by stress?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] },
+  { "id": 18, "category": "sleep", "text": "Over the past month, have you experienced significant changes in your sleep patterns?", "type": "yes_no_unsure", "options": ["Yes", "No", "Unsure"] }
+]
