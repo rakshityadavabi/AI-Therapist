@@ -1,0 +1,282 @@
+/**
+ * Client-side NLP-based severity scoring for structured voice symptom responses.
+ * DSM-5 0-4 severity scale: 0=None 1=Slight 2=Mild 3=Moderate 4=Severe.
+ */
+
+export const SYMPTOM_QUESTIONS = [
+  {
+    id: 'sleep',
+    domain: 'sleep',
+    label: 'Sleep',
+    icon: '🌙',
+    prompt: 'How has your sleep been lately? Please describe any difficulties falling asleep, staying asleep, or sleeping too much.',
+    hint: `For example: "I've been waking up at 3 am every night" or "I sleep fine."`,
+  },
+  {
+    id: 'interest',
+    domain: 'interest',
+    label: 'Interest & Motivation',
+    icon: '🎯',
+    prompt: 'How interested or motivated have you been in doing things you normally enjoy? Have you noticed a loss of pleasure or enthusiasm?',
+    hint: `For example: "I can't bring myself to do anything" or "I still enjoy my hobbies."`,
+  },
+  {
+    id: 'mood',
+    domain: 'mood',
+    label: 'Mood',
+    icon: '🧠',
+    prompt: 'How would you describe your overall mood? Have you been feeling down, depressed, or hopeless?',
+    hint: 'For example: "I feel hopeless most days" or "My mood has been okay."',
+  },
+  {
+    id: 'anxiety',
+    domain: 'anxiety',
+    label: 'Anxiety',
+    icon: '💭',
+    prompt: 'Have you been feeling anxious, worried, or on edge? Is it hard to control your worrying?',
+    hint: 'For example: "I worry about everything all the time" or "I feel pretty calm."',
+  },
+  {
+    id: 'safety',
+    domain: 'safety',
+    label: 'Safety & Self-Harm',
+    icon: '🛡️',
+    prompt: 'Have you had any thoughts of hurting yourself, harming others, or feeling like you would be better off not being here?',
+    hint: 'You can speak freely — this is a safe space and all data stays on your device.',
+  },
+];
+
+const NEGATORS = new Set([
+  'not', 'no', 'never', 'neither', 'nor', 'barely', 'hardly', 'scarcely',
+  'rarely', 'seldom', 'nothing', 'nobody', 'none', 'nowhere', 'without',
+  "don't", "didn't", "doesn't", "isn't", "aren't", "wasn't", "weren't",
+  "won't", "wouldn't", "can't", "couldn't", "shouldn't", "haven't",
+  "hasn't", "hadn't", "mustn't",
+]);
+
+const SEVERITY_ADVERBS = {
+  none: ['totally', 'completely', 'absolutely', 'perfectly'],
+  slight: ['little', 'slightly', 'sometimes', 'occasionally', 'mildly', 'a bit', 'a little', 'minor'],
+  mild: ['somewhat', 'fairly', 'moderately', 'a few', 'some', 'often sometimes', 'regularly sometimes'],
+  moderate: ['quite', 'quite a bit', 'often', 'frequently', 'significant', 'more than usual', 'mostly'],
+  severe: ['very', 'extremely', 'severely', 'intensely', 'all the time', 'constantly', 'every day', 'always', 'unbearably', 'completely'],
+};
+
+const DOMAIN_KEYWORDS = {
+  sleep: {
+    0: ['sleep fine', 'sleep well', 'sleeping well', 'no problem sleeping', 'sleep great', 'good sleep', 'rested', 'no trouble sleeping', 'sleep normally'],
+    1: ['little trouble', 'slightly tired', 'occasionally wake', 'sometimes hard to sleep', 'wake up sometimes', 'minor sleep issue'],
+    2: ['trouble sleeping', 'hard to sleep', 'wake up', 'waking up', 'difficulty sleeping', 'tired', 'fatigued', 'poor sleep', 'restless', 'not sleeping well', 'insomnia', "can't sleep sometimes"],
+    3: ["can't sleep", 'barely sleep', 'sleeping too much', 'hypersomnia', 'exhausted', 'severe insomnia', 'wake up multiple times', 'hardly sleep', 'sleep deprived'],
+    4: ['no sleep', 'not sleeping at all', 'awake all night', 'completely exhausted', 'sleep for hours and hours', 'sleeping all day', 'never sleep'],
+  },
+  interest: {
+    0: ['interested', 'enjoying', 'motivated', 'engaged', 'enthusiastic', 'love doing', 'still enjoy', 'having fun', 'look forward'],
+    1: ['little less interested', 'slightly less motivated', 'not as excited', 'mildly bored', 'sometimes less interested'],
+    2: ['lost some interest', 'not as motivated', 'less enjoyment', "don't enjoy as much", 'boring', 'not motivated', 'less engaged'],
+    3: ['lost interest', 'no motivation', "don't enjoy", 'nothing feels good', "can't be bothered", 'stopped doing', 'given up', 'pointless'],
+    4: ['completely lost interest', 'nothing matters', "can't do anything", 'no enjoyment whatsoever', 'everything is pointless', "don't care about anything"],
+  },
+  mood: {
+    0: ['good mood', 'happy', 'fine', 'okay', 'feeling well', 'content', 'positive', 'upbeat', 'cheerful', 'great'],
+    1: ['little down', 'slightly sad', 'not perfect', 'bit low', 'off day', 'occasional sadness'],
+    2: ['sad', 'down', 'depressed', 'low mood', 'not great', 'unhappy', 'feeling bad', 'blue', 'melancholy', 'gloomy'],
+    3: ['very sad', 'very depressed', 'hopeless', 'miserable', 'really down', 'dark', "can't see any good", 'nothing to look forward to'],
+    4: ['extremely depressed', 'completely hopeless', 'suicidal thoughts', 'want to die', 'life is worthless', 'no point in living', 'deeply depressed'],
+  },
+  anxiety: {
+    0: ['calm', 'relaxed', 'not anxious', 'no anxiety', 'fine', 'at ease', 'peaceful', 'no worries', 'not worried'],
+    1: ['little anxious', 'slightly worried', 'occasional worry', 'minor stress', 'sometimes nervous'],
+    2: ['anxious', 'worried', 'nervous', 'stressed', 'on edge', 'panic sometimes', 'worry a lot', 'tense', 'uneasy'],
+    3: ['very anxious', 'very worried', 'constant worry', 'panic attacks', "can't stop worrying", 'always stressed', 'overwhelming anxiety'],
+    4: ['severe anxiety', 'extreme panic', "can't function", 'paralyzing anxiety', 'panic every day', 'debilitating anxiety', 'constant panic attacks'],
+  },
+  safety: {
+    0: ['fine', 'safe', 'no thoughts', 'not thinking about', 'would never', 'okay'],
+    1: ['passing thought', 'fleeting thought', 'briefly wondered', 'crossed my mind', 'not serious'],
+    2: ['sometimes think about it', 'thought about hurting', 'thought about harm', 'had thoughts'],
+    3: ['often think about it', 'seriously thought', 'plan to hurt', 'considered it', 'contemplating'],
+    4: ['definitely want to hurt myself', 'plan to kill', 'decided to', 'will hurt myself'],
+  },
+};
+
+const SELF_HARM_KEYWORDS = [
+  'kill myself', 'end my life', 'want to die', 'suicide', 'suicidal',
+  'self harm', 'self-harm', 'hurt myself', 'harm myself', 'cut myself',
+  'not want to be here', "don't want to be here", 'better off dead',
+  'better off without me', 'end it all', 'take my own life', 'overdose',
+  'jump off', 'no reason to live', 'rather be dead', 'wish i was dead',
+  "life isn't worth", 'life is not worth', "don't want to live",
+  "don't see the point", 'no point living', 'thinking about ending',
+];
+
+function normalize(text) {
+  return (text || '').toLowerCase().replace(/['']/g, "'");
+}
+
+function tokenize(text) {
+  return normalize(text).match(/[a-z']+/g) || [];
+}
+
+function isNegated(tokens, index) {
+  for (let i = Math.max(0, index - 3); i < index; i++) {
+    if (NEGATORS.has(tokens[i])) return true;
+  }
+  return false;
+}
+
+export function detectSelfHarmIdeation(transcript) {
+  const text = normalize(transcript);
+  const matched = SELF_HARM_KEYWORDS.filter((kw) => text.includes(kw));
+  return { detected: matched.length > 0, matchedKeywords: matched };
+}
+
+export function inferDSMScore(domain, transcript) {
+  const text = normalize(transcript);
+  const tokens = tokenize(transcript);
+
+  if (!text.trim() || text.length < 5) {
+    return {
+      score: 0,
+      label: 'None',
+      confidence: 0,
+      reasoning: 'No speech detected — defaulting to None.',
+      matchDetails: [],
+    };
+  }
+
+  const kwBank = DOMAIN_KEYWORDS[domain] || DOMAIN_KEYWORDS.mood;
+  const levelScores = [0, 0, 0, 0, 0];
+  const matchDetails = [];
+
+  [0, 1, 2, 3, 4].forEach((level) => {
+    const phrases = kwBank[level] || [];
+    phrases.forEach((phrase) => {
+      if (text.includes(phrase)) {
+        const phraseStart = text.indexOf(phrase);
+        const approxTokenIndex = tokens.findIndex(
+          (_, idx) => tokens.slice(0, idx + 1).join(' ').length >= phraseStart
+        );
+        const negated = isNegated(tokens, approxTokenIndex);
+        if (negated) {
+          const flippedLevel = level <= 2 ? Math.min(level + 2, 4) : Math.max(level - 2, 0);
+          levelScores[flippedLevel] += 1;
+          matchDetails.push({ phrase, level, negated: true, effective: flippedLevel });
+        } else {
+          levelScores[level] += 2;
+          matchDetails.push({ phrase, level, negated: false, effective: level });
+        }
+      }
+    });
+  });
+
+  let adverbBoost = 0;
+  Object.entries(SEVERITY_ADVERBS).forEach(([severity, adverbs]) => {
+    adverbs.forEach((adv) => {
+      if (text.includes(adv)) {
+        const boostMap = { none: -1, slight: 0, mild: 0, moderate: 1, severe: 2 };
+        adverbBoost = Math.max(adverbBoost, boostMap[severity] || 0);
+      }
+    });
+  });
+
+  const maxScore = Math.max(...levelScores);
+  let inferredLevel = maxScore === 0 ? 0 : levelScores.lastIndexOf(maxScore);
+  inferredLevel = Math.min(4, Math.max(0, inferredLevel + adverbBoost));
+
+  const LABELS = ['None', 'Slight', 'Mild', 'Moderate', 'Severe'];
+  const confidence = maxScore > 0 ? Math.min(1, maxScore / 6) : 0.1;
+  const reasoning = buildReasoning(domain, inferredLevel, matchDetails, adverbBoost);
+
+  return {
+    score: inferredLevel,
+    label: LABELS[inferredLevel],
+    confidence,
+    reasoning,
+    matchDetails,
+  };
+}
+
+function buildReasoning(domain, score, matchDetails, adverbBoost) {
+  if (matchDetails.length === 0) {
+    return `No strong symptom indicators detected for ${domain}. Score defaulted to minimal.`;
+  }
+  const directMatches = matchDetails.filter((m) => !m.negated).map((m) => `"${m.phrase}"`);
+  const negMatches = matchDetails.filter((m) => m.negated).map((m) => `"${m.phrase}" (negated)`);
+  const allMatches = [...directMatches, ...negMatches].slice(0, 5);
+  let text = `Detected indicators: ${allMatches.join(', ')}.`;
+  if (adverbBoost > 0) text += ` Severity adverb amplification applied (+${adverbBoost}).`;
+  return text;
+}
+
+export function computeIntegratedRisk({ voiceSymptomResults, freeSpeechResults, answers }) {
+  const rationale = [];
+  let safetyOverride = false;
+  let totalScore = 0;
+  let maxPossible = 0;
+
+  if (voiceSymptomResults && voiceSymptomResults.length > 0) {
+    const symScores = voiceSymptomResults.map((r) => r.score ?? 0);
+    const avgSymScore = symScores.reduce((a, b) => a + b, 0) / symScores.length;
+    totalScore += avgSymScore * 10;
+    maxPossible += 40;
+    rationale.push(`Structured symptom avg: ${avgSymScore.toFixed(1)}/4 (${symScores.join(', ')})`);
+
+    const safetyEntry = voiceSymptomResults.find((r) => r.domain === 'safety');
+    if (safetyEntry?.safetyFlag || (safetyEntry?.score ?? 0) >= 2) {
+      safetyOverride = true;
+      rationale.push('⚠ Safety domain flagged — self-harm ideation indicators detected.');
+    }
+  }
+
+  if (freeSpeechResults) {
+    const sentScore = freeSpeechResults.sentiment?.score ?? 0;
+    const sentPoints = ((1 - sentScore) / 2) * 20;
+    totalScore += sentPoints;
+    maxPossible += 20;
+    rationale.push(
+      `Free speech sentiment: ${freeSpeechResults.sentiment?.label ?? 'N/A'} (score ${
+        freeSpeechResults.sentiment?.score?.toFixed(2) ?? '—'
+      })`
+    );
+  }
+
+  if (answers && answers.length > 0) {
+    const yesRatio = answers.filter((a) => a.answer === 'Yes').length / answers.length;
+    totalScore += yesRatio * 30;
+    maxPossible += 30;
+    rationale.push(
+      `Clinical questionnaire: ${answers.filter((a) => a.answer === 'Yes').length}/${answers.length} Yes answers`
+    );
+  }
+
+  if (answers && answers.length > 0) {
+    const negativeEmotions = ['Sad', 'Angry', 'Fearful', 'Disgusted'];
+    const negativeCount = answers.filter((a) =>
+      negativeEmotions.includes(a.emotionSnapshot?.predominantEmotion)
+    ).length;
+    const emotionRatio = negativeCount / answers.length;
+    totalScore += emotionRatio * 10;
+    maxPossible += 10;
+    rationale.push(`Facial emotion: ${negativeCount}/${answers.length} negative expressions detected`);
+  }
+
+  const normalisedScore = maxPossible > 0 ? (totalScore / maxPossible) * 100 : 0;
+
+  let level;
+  if (safetyOverride) level = 'Elevated';
+  else if (normalisedScore < 25) level = 'Low';
+  else if (normalisedScore < 50) level = 'Moderate';
+  else if (normalisedScore < 75) level = 'Elevated';
+  else level = 'High';
+
+  return {
+    level,
+    score: Math.round(normalisedScore),
+    rationale,
+    safetyOverride,
+  };
+}
+
+export const DSM_LABELS = ['None', 'Slight', 'Mild', 'Moderate', 'Severe'];
+export const DSM_COLORS = ['#4a9d7c', '#a4c95f', '#e0a23e', '#dc7a45', '#c2453f'];
